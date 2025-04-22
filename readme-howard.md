@@ -1,11 +1,15 @@
 #### WEBUI
 
+url: http://47.186.55.156:56702/
+
 > already running in 'tmux a -t webui'
 
 ## front
 npm run dev -- --port 8384 --host 0.0.0.0
 
 ## back
+normally just to 'sh dev.sh'
+
 PORT="${PORT:-8080}"
 uvicorn open_webui.main:app --port $PORT --host 0.0.0.0 --forwarded-allow-ips '*' --reload
 
