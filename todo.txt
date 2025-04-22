@@ -1,6 +1,10 @@
-[OK]fix favicon (Access to image at 'http://47.186.55.156:56574/static/favicon.png' from origin 'http://47.186.55.156:56702' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.)
-[OK]add ollama
-[OK]RAG
+[O]patch summary
+- integration
+- crawling
+-   pass the anti-crawling
+-   add the title
+# ddl: 3PM
+
 prepare Linux data
 - core API
 - io_uring
@@ -8,9 +12,14 @@ prepare Linux data
 - BPF # maybe: llama, write a BPF program that...
 - all the rst docs
 - maybe some scheduler code
-# the above done by 6:00 PM
-[O]patch summary
-create a git repo
+# ddl: 5PM
+
+[OK]fix favicon (Access to image at 'http://47.186.55.156:56574/static/favicon.png' from origin 'http://47.186.55.156:56702' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.)
+[OK]add ollama
+[OK]RAG
+
+
+[OK]create a git repo
 
 # maybe...
 API on based on kernel release versions?

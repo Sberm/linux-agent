@@ -1,0 +1,161 @@
+* [RFC PATCH v2 00/34] MSR refactor with new MSR instructions support
+@ 2025-04-22  8:21 Xin Li (Intel)
+  2025-04-22  8:21 ` [RFC PATCH v2 01/34] x86/msr: Move rdtsc{,_ordered}() to <asm/tsc.h> Xin Li (Intel)
+                   ` (34 more replies)
+  0 siblings, 35 replies; 50+ messages in thread
+From: Xin Li (Intel) @ 2025-04-22  8:21 UTC (permalink / raw)
+  To: linux-kernel, kvm, linux-perf-users, linux-hyperv, virtualization,
+	linux-pm, linux-edac, xen-devel, linux-acpi, linux-hwmon, netdev,
+	platform-driver-x86
+  Cc: tglx, mingo, bp, dave.hansen, x86, hpa, acme, jgross,
+	andrew.cooper3, peterz, namhyung, mark.rutland,
+	alexander.shishkin, jolsa, irogers, adrian.hunter, kan.liang,
+	wei.liu, ajay.kaher, bcm-kernel-feedback-list, tony.luck,
+	pbonzini, vkuznets, seanjc, luto, boris.ostrovsky, kys, haiyangz,
+	decui
+
+Obviously the existing MSR code and the pv_ops MSR access APIs need some
+love: https://lore.kernel.org/lkml/87y1h81ht4.ffs@tglx/
+
+hpa has started a discussion about how to refactor it last October:
+https://lore.kernel.org/lkml/7a4de623-ecda-4369-a7ae-0c43ef328177@zytor.com/
+
+The consensus so far is to utilize the alternatives mechanism to eliminate
+the Xen MSR access overhead on native systems and enable new MSR instructions
+based on their availability.
+
+To achieve this, a code refactor is required:
+
+Patch 1 relocates rdtsc{,_ordered}() from <asm/msr.h> to <asm/tsc.h> and
+removes the inclusion of <asm/msr.h> in <asm/tsc.h>.  As a result,
+<asm/msr.h> must now be explicitly included in several source files where
+it was previously included implicitly through <asm/tsc.h>.
+
+Patches 2 ~ 6 refactor the code to use the alternatives mechanism to read
+PMC.
+
+Patches 7 ~ 16 unify and simplify the MSR API definitions and usages.
+
+Patches 17 ~ 19 add basic support for immediate form MSR instructions,
+e.g., its CPU feature bit and opcode.
+
+Patch 20 adds a new exception type to allow a function call inside an
+alternative for instruction emulation to "kick back" the exception into
+the alternatives pattern, possibly invoking a different exception handling
+pattern there, or at least indicating the "real" location of the fault.
+
+patches 21 and 22 refactor the code to use the alternatives mechanism to
+read and write MSR.
+
+Patches 23 ~ 34 are afterwards cleanups.
+
+
+H. Peter Anvin (Intel) (1):
+  x86/extable: Implement EX_TYPE_FUNC_REWIND
+
+Xin Li (Intel) (33):
+  x86/msr: Move rdtsc{,_ordered}() to <asm/tsc.h>
+  x86/msr: Remove rdpmc()
+  x86/msr: Rename rdpmcl() to rdpmcq()
+  x86/msr: Convert rdpmcq() into a function
+  x86/msr: Return u64 consistently in Xen PMC read functions
+  x86/msr: Use the alternatives mechanism to read PMC
+  x86/msr: Convert __wrmsr() uses to native_wrmsr{,q}() uses
+  x86/msr: Convert a native_wrmsr() use to native_wrmsrq()
+  x86/msr: Add the native_rdmsrq() helper
+  x86/msr: Convert __rdmsr() uses to native_rdmsrq() uses
+  x86/msr: Remove calling native_{read,write}_msr{,_safe}() in
+    pmu_msr_{read,write}()
+  x86/msr: Remove pmu_msr_{read,write}()
+  x86/xen/msr: Remove the error pointer argument from set_reg()
+  x86/msr: refactor pv_cpu_ops.write_msr{_safe}()
+  x86/msr: Replace wrmsr(msr, low, 0) with wrmsrq(msr, low)
+  x86/msr: Change function type of native_read_msr_safe()
+  x86/cpufeatures: Add a CPU feature bit for MSR immediate form
+    instructions
+  x86/opcode: Add immediate form MSR instructions
+  x86/extable: Add support for immediate form MSR instructions
+  x86/msr: Utilize the alternatives mechanism to write MSR
+  x86/msr: Utilize the alternatives mechanism to read MSR
+  x86/extable: Remove new dead code in ex_handler_msr()
+  x86/mce: Use native MSR API __native_{wr,rd}msrq()
+  x86/msr: Rename native_wrmsrq() to native_wrmsrq_no_trace()
+  x86/msr: Rename native_wrmsr() to native_wrmsr_no_trace()
+  x86/msr: Rename native_write_msr() to native_wrmsrq()
+  x86/msr: Rename native_write_msr_safe() to native_wrmsrq_safe()
+  x86/msr: Rename native_rdmsrq() to native_rdmsrq_no_trace()
+  x86/msr: Rename native_rdmsr() to native_rdmsr_no_trace()
+  x86/msr: Rename native_read_msr() to native_rdmsrq()
+  x86/msr: Rename native_read_msr_safe() to native_rdmsrq_safe()
+  x86/msr: Move the ARGS macros after the MSR read/write APIs
+  x86/msr: Convert native_rdmsr_no_trace() uses to
+    native_rdmsrq_no_trace() uses
+
+ arch/x86/boot/startup/sme.c                   |   5 +-
+ arch/x86/events/amd/brs.c                     |   4 +-
+ arch/x86/events/amd/uncore.c                  |   2 +-
+ arch/x86/events/core.c                        |   2 +-
+ arch/x86/events/intel/core.c                  |   4 +-
+ arch/x86/events/intel/ds.c                    |   2 +-
+ arch/x86/events/msr.c                         |   3 +
+ arch/x86/events/perf_event.h                  |   1 +
+ arch/x86/events/probe.c                       |   2 +
+ arch/x86/hyperv/hv_apic.c                     |   6 +-
+ arch/x86/hyperv/hv_vtl.c                      |   4 +-
+ arch/x86/hyperv/ivm.c                         |   7 +-
+ arch/x86/include/asm/apic.h                   |   4 +-
+ arch/x86/include/asm/asm.h                    |   6 +
+ arch/x86/include/asm/cpufeatures.h            |   1 +
+ arch/x86/include/asm/extable_fixup_types.h    |   1 +
+ arch/x86/include/asm/fred.h                   |   3 +-
+ arch/x86/include/asm/microcode.h              |  10 +-
+ arch/x86/include/asm/mshyperv.h               |   3 +-
+ arch/x86/include/asm/msr.h                    | 637 ++++++++++++------
+ arch/x86/include/asm/paravirt.h               |  78 ---
+ arch/x86/include/asm/paravirt_types.h         |  13 -
+ arch/x86/include/asm/sev-internal.h           |   9 +-
+ arch/x86/include/asm/spec-ctrl.h              |   2 +-
+ arch/x86/include/asm/suspend_32.h             |   1 +
+ arch/x86/include/asm/suspend_64.h             |   1 +
+ arch/x86/include/asm/switch_to.h              |   4 +-
+ arch/x86/include/asm/tsc.h                    |  76 ++-
+ arch/x86/kernel/cpu/amd.c                     |   2 +-
+ arch/x86/kernel/cpu/common.c                  |  10 +-
+ arch/x86/kernel/cpu/mce/core.c                |  61 +-
+ arch/x86/kernel/cpu/microcode/amd.c           |  10 +-
+ arch/x86/kernel/cpu/microcode/core.c          |   4 +-
+ arch/x86/kernel/cpu/microcode/intel.c         |   8 +-
+ arch/x86/kernel/cpu/resctrl/pseudo_lock.c     |  25 +-
+ arch/x86/kernel/cpu/resctrl/rdtgroup.c        |   2 +-
+ arch/x86/kernel/cpu/scattered.c               |   1 +
+ arch/x86/kernel/cpu/umwait.c                  |   4 +-
+ arch/x86/kernel/fpu/xstate.h                  |   1 +
+ arch/x86/kernel/hpet.c                        |   1 +
+ arch/x86/kernel/kvm.c                         |   2 +-
+ arch/x86/kernel/kvmclock.c                    |   2 +-
+ arch/x86/kernel/paravirt.c                    |   5 -
+ arch/x86/kernel/process_64.c                  |   1 +
+ arch/x86/kernel/trace_clock.c                 |   2 +-
+ arch/x86/kernel/tsc_sync.c                    |   1 +
+ arch/x86/kvm/svm/svm.c                        |  34 +-
+ arch/x86/kvm/vmx/vmx.c                        |  12 +-
+ arch/x86/lib/kaslr.c                          |   2 +-
+ arch/x86/lib/x86-opcode-map.txt               |   5 +-
+ arch/x86/mm/extable.c                         | 181 +++--
+ arch/x86/realmode/init.c                      |   1 +
+ arch/x86/xen/enlighten_pv.c                   | 112 ++-
+ arch/x86/xen/pmu.c                            |  63 +-
+ arch/x86/xen/xen-asm.S                        | 113 ++++
+ arch/x86/xen/xen-ops.h                        |  14 +-
+ drivers/acpi/processor_perflib.c              |   1 +
+ drivers/acpi/processor_throttling.c           |   3 +-
+ drivers/cpufreq/amd-pstate-ut.c               |   2 +
+ drivers/hwmon/hwmon-vid.c                     |   4 +
+ drivers/net/vmxnet3/vmxnet3_drv.c             |   6 +-
+ .../intel/speed_select_if/isst_if_common.c    |   1 +
+ drivers/platform/x86/intel/turbo_max_3.c      |   1 +
+ tools/arch/x86/lib/x86-opcode-map.txt         |   5 +-
+ 64 files changed, 988 insertions(+), 605 deletions(-)
+
+
+base-commit: f30a0c0d2b08b355c01392538de8fc872387cb2b

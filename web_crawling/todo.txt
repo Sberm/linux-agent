@@ -1,0 +1,3 @@
+# run 'pend'
+Retrieve the patches of the past 3 days # 7 days are too much # Qin
+Feed the content to LLM # Howard
