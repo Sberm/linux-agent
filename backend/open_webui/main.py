@@ -883,6 +883,20 @@ class RedirectMiddleware(BaseHTTPMiddleware):
 app.add_middleware(RedirectMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
+from starlette.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class CustomCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.endswith(".png"):
+            log.debug("[debug] image")
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+app.add_middleware(
+    CustomCORSMiddleware,
+)
 
 @app.middleware("http")
 async def commit_session_after_request(request: Request, call_next):
