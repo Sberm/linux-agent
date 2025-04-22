@@ -1,3 +1,7 @@
+#### WEBUI
+
+> already running in 'tmux a -t webui'
+
 ## front
 npm run dev -- --port 8384 --host 0.0.0.0
 
@@ -27,3 +31,11 @@ CORS_ALLOW_ORIGIN='http://47.186.55.156:56702'
 
 ## ollama
 ollama serve
+
+#### Data
+
+Put them in rag-data, before feeding to the vector database
+
+#### Web crawling
+
+In ./web_crawling

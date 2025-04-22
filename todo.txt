@@ -1,8 +1,9 @@
 [O]patch summary
 - integration
-- crawling
--   pass the anti-crawling
+[O]- crawling
+[OK]-   pass the anti-crawling
 -   add the title
+-   expose the API
 # ddl: 3PM
 
 prepare Linux data
@@ -13,6 +14,11 @@ prepare Linux data
 - all the rst docs
 - maybe some scheduler code
 # ddl: 5PM
+
+RAG performance optimization
+LLM code review (open/close, malloc/free, especially Linux specific ones, such as zfree)
+maybe: show me all the APIs in io_uring
+maybe: vscode plugin (code review, find function definition/doc, ask for mailing list summary)
 
 [OK]fix favicon (Access to image at 'http://47.186.55.156:56574/static/favicon.png' from origin 'http://47.186.55.156:56702' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.)
 [OK]add ollama
