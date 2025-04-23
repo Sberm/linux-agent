@@ -35,9 +35,10 @@ class Crawler:
         """
 
         # Use BeautifulSoup to parse the HTML
-        print(f"🌐 Loading sub-archive page: {sub_archive_url}")
+        url = sub_archive_url + query
+        print(f"🌐 Loading sub-archive page: {url}")
         page = await self.context.new_page()
-        await page.goto(sub_archive_url + f'/{query}', wait_until="domcontentloaded")
+        await page.goto(url, wait_until="domcontentloaded")
         # Wait until the <pre> tags appear. 
         await page.wait_for_selector(selector = "pre", timeout=60000)  
         html = await page.content()
@@ -123,6 +124,7 @@ class Crawler:
         Return a thread list with each entry [url, title, emails]. 
         """
         links = await self.get_thread_links_under_sub_archive(sub_archive_url=f"https://lore.kernel.org/{sub_archive}/")
+        # limit = 5
         
         threads = []
         
@@ -130,9 +132,9 @@ class Crawler:
             emails = await self.get_emails_under_thread(thread_url=url)
             # log_color(f"url {url} title {title}")
             entry = {
-                "url": url, 
+                # "url": url, 
                 "title": title, 
-                "emails": emails
+                "description": emails
             }
             threads.append(entry)
         
@@ -484,6 +486,8 @@ async def check_and_craw(prompt):
         'ultralinux'
     ]
 
+    log_color('fuck you howard')
+
     if 'mailing' in prompt and 'list' in prompt:
         _p = prompt.split(' ')
         for p in _p:
@@ -492,9 +496,10 @@ async def check_and_craw(prompt):
                     log_color(f'searching mailing list {p}')
                     await crawler.check()
                     content = await crawler.craw(p)
-                    # log_color(content)
-                    return 'what is 1 + 1'
-                    # return 'summary these patches: "'+ content + '"'
+                    return f"""
+Here are patches from the Linux mailing list, summary them based on the descriptions and titles, 
+don\' t provide any other information. patches: \"{content}\""""
+
     return prompt
 
 crawler = Crawler()

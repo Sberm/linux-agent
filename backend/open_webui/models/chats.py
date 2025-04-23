@@ -109,6 +109,7 @@ class ChatTitleIdResponse(BaseModel):
 
 class ChatTable:
     def insert_new_chat(self, user_id: str, form_data: ChatForm) -> Optional[ChatModel]:
+        log.info(f"\n\n\033[0;33mI'm here in inser_new_chat\033[0m\n\n")
         with get_db() as db:
             id = str(uuid.uuid4())
             chat = ChatModel(

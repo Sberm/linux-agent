@@ -376,26 +376,25 @@ async def update_chat_by_id(
         # with open('/root/hw/linux-agent/form_data.txt', 'a') as f:
         #     f.write(json.dumps(form_data.chat) + '\n\n' + 'ok')
 
-        chat_data = form_data.chat
-        is_done = lambda x: 'done' in x['messages'][-1]
-        if not is_done(chat_data):
-            prompt = await check_and_craw(chat_data['messages'][-2]['content'])
-            # log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
+        # chat_data = form_data.chat
+        # is_done = lambda x: 'done' in x['messages'][-1]
+        # if not is_done(chat_data):
+        #     prompt = await check_and_craw(chat_data['messages'][-2]['content'])
+        #     log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
 
-            # _id = chat_data['messages'][-2]['id']
-            # chat_data['messages'][-2]['content'] = prompt
-            # chat_data['history']['messages'][_id]['content'] = prompt
+        #     _id = chat_data['messages'][-2]['id']
+        #     chat_data['messages'][-2]['content'] = prompt
+        #     chat_data['history']['messages'][_id]['content'] = prompt
 
-            # _id = chat.chat['messages'][-1]['id']
-            # chat.chat['messages'][-1]['content'] = prompt
-            # chat.chat['history']['messages'][_id]['content'] = prompt
+        #     _id = chat.chat['messages'][-1]['id']
+        #     chat.chat['messages'][-1]['content'] = prompt
+        #     chat.chat['history']['messages'][_id]['content'] = prompt
 
-            log_color(json.dumps(chat_data))
-            log_color('=== separation ===')
-            log_color(json.dumps(chat.chat))
-        time.sleep(2)
+        #     # log_color(json.dumps(chat_data))
+        #     # log_color('=== separation ===')
+        #     # log_color(json.dumps(chat.chat))
 
-        updated_chat = {**chat.chat, **chat_data}
+        updated_chat = {**chat.chat, **form_data.chat}
         chat = Chats.update_chat_by_id(id, updated_chat)
         return ChatResponse(**chat.model_dump())
     else:

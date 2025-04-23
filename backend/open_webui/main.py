@@ -90,6 +90,7 @@ from open_webui.models.functions import Functions
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel, Users
 from open_webui.models.chats import Chats
+from open_webui.howard.craw import check_and_craw
 
 from open_webui.config import (
     LICENSE_KEY,
@@ -1090,6 +1091,10 @@ async def chat_completion(
 
     model_item = form_data.pop("model_item", {})
     tasks = form_data.pop("background_tasks", None)
+
+    prompt = await check_and_craw(form_data['messages'][-1]['content'])
+    log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
+    form_data['messages'][-1]['content'] = prompt
 
     metadata = {}
     try:
