@@ -3,7 +3,9 @@
 [O]- crawling
 [OK]-   pass the anti-crawling
 -   add the title
--   expose the API
+[OK]-   expose the API
+[OK]-   do the time query thing
+[OK]-   complete the mailing lists (second page)
 # ddl: 3PM
 
 prepare Linux data
@@ -15,17 +17,15 @@ prepare Linux data
 - maybe some scheduler code
 # ddl: 5PM
 
-RAG performance optimization
 LLM code review (open/close, malloc/free, especially Linux specific ones, such as zfree)
-maybe: show me all the APIs in io_uring
+maybe: show me all the APIs in io_uring (summary on a header file)
 maybe: vscode plugin (code review, find function definition/doc, ask for mailing list summary)
 
+[OK]RAG performance optimization
 [OK]fix favicon (Access to image at 'http://47.186.55.156:56574/static/favicon.png' from origin 'http://47.186.55.156:56702' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource.)
 [OK]add ollama
 [OK]RAG
-
-
 [OK]create a git repo
 
 # maybe...
-API on based on kernel release versions?
+API on based on kernel release versions? (git checkout)

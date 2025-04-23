@@ -890,7 +890,7 @@ class CustomCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         if request.url.path.endswith(".png"):
-            log.debug("[debug] image")
+            log.info("[debug] image")
             response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 

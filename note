@@ -1,0 +1,94 @@
+Get Apache Tika running in a separate Docker container
+
+Hybrid search = on
+
+Ollama as embedding model engine
+
+Content extraction = Tika (http://host.docker.internal:9998)
+
+BAA/bge-m3 as the embedder model
+
+BAA/bge-reranker-v2m3 as the reranker model
+
+Top k = 15
+
+Chunk size = 2000
+
+Chunk overlap = 200
+
+PDF OCR = off
+
+
+# 
+{"id": "", "title": "New Chat", "models": ["gemma--libc"], "params": {}, "history": {"messages": {"6b4f8749-6900-49ec-bdb7-03bf2cadd0ca": {"id": "6b4f8749-6900-49ec-bdb7-03bf2cadd0ca", "parentId": "None", "childrenIds": [], "role": "user", "content": "hello", "timestamp": 1745378812, "models": ["gemma--libc"]}}, "currentId": "6b4f8749-6900-49ec-bdb7-03bf2cadd0ca"}, "messages": [{"id": "6b4f8749-6900-49ec-bdb7-03bf2cadd0ca", "pa rentId": "None", "childrenIds": [], "role": "user", "content": "hello", "timestamp": 1745378812, "models": ["gemma--libc"]}], "tags": [], "timestamp": 1745378812300}
+
+
+update_chat_by_id()
+
+backend/open_webui/routers/chats.py -> backend/open_webui/models/chats.py
+
+
+
+2025-04-23 16:24:26.955 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35314 - "POST /api/v1/chats/7500aab5-3db5-492e-9368-bea4ffd4ce4c HTTP/1.1" 200 - {}
+2025-04-23 16:24:27.085 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35314 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+2025-04-23 16:24:27.367 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35314 - "POST /api/chat/completions HTTP/1.1" 200 - {}
+2025-04-23 16:24:27.550 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35314 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+2025-04-23 16:24:27.787 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35314 - "OPTIONS /api/v1/chats/aeef3525-fe6d-42c5-8d51-53d039f501b1 HTTP/1.1" 200 - {}
+[!!!]2025-04-23 16:24:27.855 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:35328 - "GET /api/v1/chats/aeef3525-fe6d-42c5-8d51-53d039f501b1 HTTP/1.1" 200 - {} [!!!]
+2025-04-23 16:24:47.696 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:39484 - "POST /api/chat/completed HTTP/1.1" 200 - {}
+2025-04-23 16:24:47.808 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:39484 - "POST /api/v1/chats/7500aab5-3db5-492e-9368-bea4ffd4ce4c HTTP/1.1" 200 - {}
+2025-04-23 16:24:47.943 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:39484 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+
+post id
+page
+completions
+page
+(*)options id
+(*)get id
+[wait]
+completed
+
+
+2025-04-23 16:29:28.153 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55260 - "POST /api/v1/chats/7500aab5-3db5-492e-9368-bea4ffd4ce4c HTTP/1.1" 200 - {}
+2025-04-23 16:29:28.290 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55260 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+2025-04-23 16:29:28.940 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55260 - "POST /api/chat/completions HTTP/1.1" 200 - {}
+[!!!]2025-04-23 16:29:29.021 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55260 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {} [!!!]
+2025-04-23 16:29:50.190 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55274 - "POST /api/chat/completed HTTP/1.1" 200 - {}
+2025-04-23 16:29:50.419 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55274 - "POST /api/v1/chats/7500aab5-3db5-492e-9368-bea4ffd4ce4c HTTP/1.1" 200 - {}
+2025-04-23 16:29:50.557 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55274 - "OPTIONS /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+2025-04-23 16:29:50.626 | INFO     | uvicorn.protocols.http.httptools_impl:send:476 - 73.202.46.50:55274 - "GET /api/v1/chats/?page=1 HTTP/1.1" 200 - {}
+
+post id
+page
+completions
+page
+[wait]
+completed
+
+
+
+query_collection
+    query_doc
+
+
+  File "/usr/lib/python3.11/threading.py", line 1002, in _bootstrap                                                                                
+    self._bootstrap_inner()                                                                                                                        
+  File "/usr/lib/python3.11/threading.py", line 1045, in _bootstrap_inner                                                                          
+    self.run()                                                                                                                                     
+  File "/usr/lib/python3.11/threading.py", line 982, in run                                                                                        
+    self._target(*self._args, **self._kwargs)                                                                                                      
+  File "/usr/lib/python3.11/concurrent/futures/thread.py", line 83, in _worker                                                                     
+    work_item.run()                                                                                                                                
+  File "/usr/lib/python3.11/concurrent/futures/thread.py", line 58, in run                                                                         
+    result = self.fn(*self.args, **self.kwargs)
+  File "/root/hw/linux-agent/backend/open_webui/utils/middleware.py", line 619, in <lambda>
+    lambda: get_sources_from_files(
+  File "/root/hw/linux-agent/backend/open_webui/retrieval/utils.py", line 549, in get_sources_from_files
+    context = query_collection(
+  File "/root/hw/linux-agent/backend/open_webui/retrieval/utils.py", line 271, in query_collection
+    traceback.print_stack(file=sys.stdout)
+
+
+process_chat_payload
+    chat_completion_files_handler
+        get_sources_from_files

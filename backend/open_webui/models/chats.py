@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
 
+def log_color(d):
+    log.info(f"\n\n\033[0;33m{d}\033[0m\n\n")
+
 class Chat(Base):
     __tablename__ = "chat"
 
@@ -163,6 +166,7 @@ class ChatTable:
             with get_db() as db:
                 chat_item = db.get(Chat, id)
                 chat_item.chat = chat
+                log_color
                 chat_item.title = chat["title"] if "title" in chat else "New Chat"
                 chat_item.updated_at = int(time.time())
                 db.commit()
@@ -435,6 +439,8 @@ class ChatTable:
                 query = query.limit(limit)
 
             all_chats = query.all()
+
+            # log.info(f"\n\n\033[0;33m{all_chats}\033[0m\n\n")
 
             # result has to be destrctured from sqlalchemy `row` and mapped to a dict since the `ChatModel`is not the returned dataclass.
             return [

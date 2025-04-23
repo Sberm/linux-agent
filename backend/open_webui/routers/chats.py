@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Optional
+import time
 
 
 from open_webui.socket.main import get_event_emitter
@@ -24,6 +25,8 @@ from pydantic import BaseModel
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_permission
 
+from open_webui.howard.craw import check_and_craw
+
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
 
@@ -43,6 +46,7 @@ async def get_session_user_chat_list(
         limit = 60
         skip = (page - 1) * limit
 
+        # howard: here
         return Chats.get_chat_title_id_list_by_user_id(user.id, skip=skip, limit=limit)
     else:
         return Chats.get_chat_title_id_list_by_user_id(user.id)
@@ -357,14 +361,41 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user)):
 # UpdateChatById
 ############################
 
+def log_color(d):
+    log.info(f"\n\n\033[0;33m{d}\033[0m\n\n")
 
 @router.post("/{id}", response_model=Optional[ChatResponse])
+# [howard]
 async def update_chat_by_id(
     id: str, form_data: ChatForm, user=Depends(get_verified_user)
 ):
+    log_color("in update_char_by_id")
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
-        updated_chat = {**chat.chat, **form_data.chat}
+        # debug
+        # with open('/root/hw/linux-agent/form_data.txt', 'a') as f:
+        #     f.write(json.dumps(form_data.chat) + '\n\n' + 'ok')
+
+        chat_data = form_data.chat
+        is_done = lambda x: 'done' in x['messages'][-1]
+        if not is_done(chat_data):
+            prompt = await check_and_craw(chat_data['messages'][-2]['content'])
+            # log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
+
+            # _id = chat_data['messages'][-2]['id']
+            # chat_data['messages'][-2]['content'] = prompt
+            # chat_data['history']['messages'][_id]['content'] = prompt
+
+            # _id = chat.chat['messages'][-1]['id']
+            # chat.chat['messages'][-1]['content'] = prompt
+            # chat.chat['history']['messages'][_id]['content'] = prompt
+
+            log_color(json.dumps(chat_data))
+            log_color('=== separation ===')
+            log_color(json.dumps(chat.chat))
+        time.sleep(2)
+
+        updated_chat = {**chat.chat, **chat_data}
         chat = Chats.update_chat_by_id(id, updated_chat)
         return ChatResponse(**chat.model_dump())
     else:
@@ -385,6 +416,7 @@ class MessageForm(BaseModel):
 async def update_chat_message_by_id(
     id: str, message_id: str, form_data: MessageForm, user=Depends(get_verified_user)
 ):
+    log.info('message')
     chat = Chats.get_chat_by_id(id)
 
     if not chat:

@@ -5,6 +5,8 @@ from typing import Optional, Union
 import requests
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+import traceback
+import sys
 
 from huggingface_hub import snapshot_download
 from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
@@ -72,17 +74,21 @@ class VectorSearchRetriever(BaseRetriever):
             )
         return results
 
-
+import time
 def query_doc(
     collection_name: str, query_embedding: list[float], k: int, user: UserModel = None
 ):
     try:
         log.debug(f"query_doc:doc {collection_name}")
+        log.info('querying')
+        start = time.perf_counter()
         result = VECTOR_DB_CLIENT.search(
             collection_name=collection_name,
             vectors=[query_embedding],
             limit=k,
         )
+        end = time.perf_counter()
+        log.info(f'end, used {(end - start) * 1000} ms')
 
         if result:
             log.info(f"query_doc:result {result.ids} {result.metadatas}")
@@ -260,6 +266,12 @@ def query_collection(
     k: int,
 ) -> dict:
     results = []
+    # log.info(f"\n\n\033[0;33mdid somebody just called me?\033[0m\n\n")
+    # print("\n\n\033[0;33m")
+    # traceback.print_stack(file=sys.stdout)
+    # print("\033[0m\n\n")
+
+    # log.info(f"\n\n\033[0;33m\033[0m\n\n")
     for query in queries:
         log.debug(f"query_collection:query {query}")
         query_embedding = embedding_function(query, prefix=RAG_EMBEDDING_QUERY_PREFIX)
