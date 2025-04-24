@@ -42,6 +42,8 @@ from typing import Any
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.retrievers import BaseRetriever
 
+def log_color(d):
+    log.info(f"\n\n\033[0;33m{d}\033[0m\n\n")
 
 class VectorSearchRetriever(BaseRetriever):
     collection_name: Any
@@ -82,6 +84,8 @@ def query_doc(
         log.debug(f"query_doc:doc {collection_name}")
         log.info('querying')
         start = time.perf_counter()
+        # log_color(f'k is {k}')
+        k = 3
         result = VECTOR_DB_CLIENT.search(
             collection_name=collection_name,
             vectors=[query_embedding],

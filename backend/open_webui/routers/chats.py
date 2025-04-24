@@ -369,7 +369,6 @@ def log_color(d):
 async def update_chat_by_id(
     id: str, form_data: ChatForm, user=Depends(get_verified_user)
 ):
-    log_color("in update_char_by_id")
     chat = Chats.get_chat_by_id_and_user_id(id, user.id)
     if chat:
         # debug

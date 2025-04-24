@@ -9,11 +9,10 @@
 # ddl: 3PM
 
 prepare Linux data
-- core API
+[OK]- core API
 - io_uring
 - libperf
 - BPF # maybe: llama, write a BPF program that...
-- all the rst docs
 - maybe some scheduler code
 # ddl: 5PM
 

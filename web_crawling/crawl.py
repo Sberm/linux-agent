@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 import sys
 
-def output_to_file(text_to_output, filename="output.txt", output_dir='./output/'):
+def output_to_file(text_to_output, filename="output.txt", output_dir='./debug_output/'):
     """
     Outputs a given string to a file at the specified path.
 

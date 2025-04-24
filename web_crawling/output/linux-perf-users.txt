@@ -1,0 +1,3531 @@
+On Thu, Apr 24, 2025 at 10:54:29AM +0800, Baisheng Gao wrote:
+> In order to fix the race condition between exit_mmap and
+> perf_output_sample below, forbidding to copy the user stack
+> of an exiting process.
+
+You cannot say "the race" and not describe the race. A stack dump is not
+a description of a race.
+On Thu, Apr 17, 2025 at 02:55:50PM +0100, James Clark wrote:
+> Since pulling in the kernel changes in commit 22f72088ffe6 ("tools
+> headers: Update the syscall table with the kernel sources"), arm64 is
+> no longer using a generic syscall header and generates one from the
+> syscall table. Therefore we must also generate the syscall header for
+> arm64 before building Perf.
+> 
+> Add it as a dependency to libperf which uses one syscall number. Perf
+> uses more, but as libperf is a dependency of Perf it will be generated
+> for both.
+> 
+> Future platforms that need this will have to add their own syscall-y
+> targets in libperf manually. Unfortunately the arch specific files that
+> do this (e.g. arch/arm64/include/asm/Kbuild) can't easily be imported
+> into the Perf build. But Perf only needs a subset of the generated files
+> anyway, so redefining them is probably the correct thing to do.
+> 
+> Fixes: 22f72088ffe6 ("tools headers: Update the syscall table with the kernel sources")
+> Signed-off-by: James Clark <james.clark@linaro.org>
+
+Reviewed-by: Leo Yan <leo.yan@arm.com>
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 1968 bytes --]
+
+On 22.04.25 10:21, Xin Li (Intel) wrote:
+> An MSR value is represented as a 64-bit unsigned integer, with existing
+> MSR instructions storing it in EDX:EAX as two 32-bit segments.
+> 
+> The new immediate form MSR instructions, however, utilize a 64-bit
+> general-purpose register to store the MSR value.  To unify the usage of
+> all MSR instructions, let the default MSR access APIs accept an MSR
+> value as a single 64-bit argument instead of two 32-bit segments.
+> 
+> The dual 32-bit APIs are still available as convenient wrappers over the
+> APIs that handle an MSR value as a single 64-bit argument.
+> 
+> The following illustrates the updated derivation of the MSR write APIs:
+> 
+>                   __wrmsrq(u32 msr, u64 val)
+>                     /                  \
+>                    /                    \
+>             native_wrmsrq(msr, val)    native_wrmsr(msr, low, high)
+>                   |
+>                   |
+>             native_write_msr(msr, val)
+>                  /          \
+>                 /            \
+>         wrmsrq(msr, val)    wrmsr(msr, low, high)
+> 
+> When CONFIG_PARAVIRT is enabled, wrmsrq() and wrmsr() are defined on top
+> of paravirt_write_msr():
+> 
+>              paravirt_write_msr(u32 msr, u64 val)
+>                 /             \
+>                /               \
+>            wrmsrq(msr, val)    wrmsr(msr, low, high)
+> 
+> paravirt_write_msr() invokes cpu.write_msr(msr, val), an indirect layer
+> of pv_ops MSR write call:
+> 
+>      If on native:
+> 
+>              cpu.write_msr = native_write_msr
+> 
+>      If on Xen:
+> 
+>              cpu.write_msr = xen_write_msr
+> 
+> Therefore, refactor pv_cpu_ops.write_msr{_safe}() to accept an MSR value
+> in a single u64 argument, replacing the current dual u32 arguments.
+> 
+> No functional change intended.
+> 
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+
+Reviewed-by: Juergen Gross <jgross@suse.com>
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 577 bytes --]
+
+On 22.04.25 10:21, Xin Li (Intel) wrote:
+> set_reg() is used to write the following MSRs on Xen:
+> 
+>      MSR_FS_BASE
+>      MSR_KERNEL_GS_BASE
+>      MSR_GS_BASE
+> 
+> But none of these MSRs are written using any MSR write safe API.
+> Therefore there is no need to pass an error pointer argument to
+> set_reg() for returning an error code to be used in MSR safe APIs.
+
+set_seg(), please (further up, too).
+
+> 
+> Remove the error pointer argument.
+> 
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+
+Reviewed-by: Juergen Gross <jgross@suse.com>
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 4849 bytes --]
+
+On 22.04.25 10:21, Xin Li (Intel) wrote:
+> As pmu_msr_{read,write}() are now wrappers of pmu_msr_chk_emulated(),
+> remove them and use pmu_msr_chk_emulated() directly.
+> 
+> While at it, convert the data type of MSR index to u32 in functions
+> called in pmu_msr_chk_emulated().
+> 
+> Suggested-by: H. Peter Anvin (Intel) <hpa@zytor.com>
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+> ---
+>   arch/x86/xen/enlighten_pv.c | 17 ++++++++++-------
+>   arch/x86/xen/pmu.c          | 24 ++++--------------------
+>   arch/x86/xen/xen-ops.h      |  3 +--
+>   3 files changed, 15 insertions(+), 29 deletions(-)
+> 
+> diff --git a/arch/x86/xen/enlighten_pv.c b/arch/x86/xen/enlighten_pv.c
+> index 1418758b57ff..b5a8bceb5f56 100644
+> --- a/arch/x86/xen/enlighten_pv.c
+> +++ b/arch/x86/xen/enlighten_pv.c
+> @@ -1089,8 +1089,9 @@ static void xen_write_cr4(unsigned long cr4)
+>   static u64 xen_do_read_msr(unsigned int msr, int *err)
+>   {
+>   	u64 val = 0;	/* Avoid uninitialized value for safe variant. */
+> +	bool emulated;
+>   
+> -	if (pmu_msr_read(msr, &val, err))
+> +	if (pmu_msr_chk_emulated(msr, &val, true, &emulated) && emulated)
+>   		return val;
+>   
+>   	if (err)
+> @@ -1133,6 +1134,7 @@ static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>   			     unsigned int high, int *err)
+>   {
+>   	u64 val;
+> +	bool emulated;
+>   
+>   	switch (msr) {
+>   	case MSR_FS_BASE:
+> @@ -1162,12 +1164,13 @@ static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>   	default:
+>   		val = (u64)high << 32 | low;
+>   
+> -		if (!pmu_msr_write(msr, val)) {
+> -			if (err)
+> -				*err = native_write_msr_safe(msr, low, high);
+> -			else
+> -				native_write_msr(msr, low, high);
+> -		}
+> +		if (pmu_msr_chk_emulated(msr, &val, false, &emulated) && emulated)
+> +			return;
+> +
+> +		if (err)
+> +			*err = native_write_msr_safe(msr, low, high);
+> +		else
+> +			native_write_msr(msr, low, high);
+>   	}
+>   }
+>   
+> diff --git a/arch/x86/xen/pmu.c b/arch/x86/xen/pmu.c
+> index 95caae97a394..afb02f43ee3f 100644
+> --- a/arch/x86/xen/pmu.c
+> +++ b/arch/x86/xen/pmu.c
+> @@ -128,7 +128,7 @@ static inline uint32_t get_fam15h_addr(u32 addr)
+>   	return addr;
+>   }
+>   
+> -static inline bool is_amd_pmu_msr(unsigned int msr)
+> +static bool is_amd_pmu_msr(u32 msr)
+>   {
+>   	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD &&
+>   	    boot_cpu_data.x86_vendor != X86_VENDOR_HYGON)
+> @@ -194,8 +194,7 @@ static bool is_intel_pmu_msr(u32 msr_index, int *type, int *index)
+>   	}
+>   }
+>   
+> -static bool xen_intel_pmu_emulate(unsigned int msr, u64 *val, int type,
+> -				  int index, bool is_read)
+> +static bool xen_intel_pmu_emulate(u32 msr, u64 *val, int type, int index, bool is_read)
+>   {
+>   	uint64_t *reg = NULL;
+>   	struct xen_pmu_intel_ctxt *ctxt;
+> @@ -257,7 +256,7 @@ static bool xen_intel_pmu_emulate(unsigned int msr, u64 *val, int type,
+>   	return false;
+>   }
+>   
+> -static bool xen_amd_pmu_emulate(unsigned int msr, u64 *val, bool is_read)
+> +static bool xen_amd_pmu_emulate(u32 msr, u64 *val, bool is_read)
+>   {
+>   	uint64_t *reg = NULL;
+>   	int i, off = 0;
+> @@ -298,8 +297,7 @@ static bool xen_amd_pmu_emulate(unsigned int msr, u64 *val, bool is_read)
+>   	return false;
+>   }
+>   
+> -static bool pmu_msr_chk_emulated(unsigned int msr, uint64_t *val, bool is_read,
+> -				 bool *emul)
+> +bool pmu_msr_chk_emulated(u32 msr, u64 *val, bool is_read, bool *emul)
+>   {
+>   	int type, index = 0;
+>   
+> @@ -313,20 +311,6 @@ static bool pmu_msr_chk_emulated(unsigned int msr, uint64_t *val, bool is_read,
+>   	return true;
+>   }
+>   
+> -bool pmu_msr_read(u32 msr, u64 *val)
+> -{
+> -	bool emulated;
+> -
+> -	return pmu_msr_chk_emulated(msr, val, true, &emulated) && emulated;
+> -}
+> -
+> -bool pmu_msr_write(u32 msr, u64 val)
+> -{
+> -	bool emulated;
+> -
+> -	return pmu_msr_chk_emulated(msr, &val, false, &emulated) && emulated;
+> -}
+> -
+>   static u64 xen_amd_read_pmc(int counter)
+>   {
+>   	struct xen_pmu_amd_ctxt *ctxt;
+> diff --git a/arch/x86/xen/xen-ops.h b/arch/x86/xen/xen-ops.h
+> index a1875e10be31..fde9f9d7415f 100644
+> --- a/arch/x86/xen/xen-ops.h
+> +++ b/arch/x86/xen/xen-ops.h
+> @@ -271,8 +271,7 @@ void xen_pmu_finish(int cpu);
+>   static inline void xen_pmu_init(int cpu) {}
+>   static inline void xen_pmu_finish(int cpu) {}
+>   #endif
+> -bool pmu_msr_read(u32 msr, u64 *val);
+> -bool pmu_msr_write(u32 msr, u64 val);
+> +bool pmu_msr_chk_emulated(u32 msr, u64 *val, bool is_read, bool *emul);
+>   int pmu_apic_update(uint32_t reg);
+>   u64 xen_read_pmc(int counter);
+>   
+
+May I suggest to get rid of the "emul" parameter of pmu_msr_chk_emulated()?
+It has no real value, as pmu_msr_chk_emulated() could easily return false in
+the cases where it would set *emul to false.
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+On Thu, Apr 24, 2025 at 03:50:53AM -0400, ffhgfv wrote:
+> Hello, I found a potential bug titled "  WARNING in release_bp_slot  " with modified syzkaller in the  Linux6.12.24(longterm maintenance, last updated on April 20, 2025).
+> If you fix this issue, please add the following tag to the commit:  Reported-by: Jianzhou Zhao <xnxc22xnxc22@qq.com>,    xingwei lee <xrivendell7@gmail.com>,Penglei Jiang <superman.xpt@gmail.com>
+
+As you have a reproducer, you are in the best position to create a fix
+for this as you can test it.  Please do so, such that you can get credit
+for resolving the issue.
+
+thanks,
+
+greg k-h
+Is the command "perf kvm top" executed in host or guest when you see guest
+crash? Is it easy to be reproduced? Could you please provide the detailed
+steps to reproduce the issue with 6.15-rc1 kernel?
+
+
+On 4/9/2025 12:54 AM, Seth Forshee wrote:
+> A colleague of mine reported kvm guest hangs when running "perf kvm top"
+> with a 6.1 kernel. Initially it looked like the problem might be fixed
+> in newer kernels, but it turned out to be perf changes which must avoid
+> triggering the issue. I was able to reproduce the guest crashes with
+> 6.15-rc1 in both the host and the guest when using an older version of
+> perf. A bisect of perf landed on 7b100989b4f6 "perf evlist: Remove
+> __evlist__add_default", but this doesn't look to be fixing any kind of
+> issue like this.
+>
+> This box has an Ice Lake CPU, and we can reproduce on other Ice Lakes
+> but could not reproduce on another box with Broadwell. On Broadwell
+> guests would crash with older kernels in the host, but this was fixed by
+> 971079464001 "KVM: x86/pmu: fix masking logic for
+> MSR_CORE_PERF_GLOBAL_CTRL". That does not fix the issues we see on Ice
+> Lake.
+>
+> When the guests crash we aren't getting any output on the serial
+> console, but I got this from a memory dump:
+>
+> BUG: unable to handle page fault for address: fffffe76ffbaf00000
+> BUG: unable to handle page fault for address: fffffe76ffbaf00000
+> #PF: supervisor write access in kernel mode
+> #PF: error_code(0x0002) - not-present page
+> BUG: unable to handle page fault for address: fffffe76ffbaf00000
+> #PF: supervisor write access in kernel mode
+> #PF: error_code(0x0002) - not-present page
+> PGD 2e044067 P4D 3ec42067 PUD 3ec41067 PMD 3ec40067 PTE ffffffffff120
+> Oops: Oops: 0002 [#1] SMP NOPTI
+> BUG: unable to handle page fault for address: fffffe76ffbaf00000
+> #PF: supervisor write access in kernel mode
+> #PF: error_code(0x0002) - not-present page
+> PGD 2e044067 P4D 3ec42067 PUD 3ec41067 PMD 3ec40067 PTE ffffffffff120
+> Oops: Oops: 0002 [#2] SMP NOPTI
+> CPU: 0 UID: 0 PID: 0 Comm: swapper/0 Not tainted 6.15.0-rc1 #3 VOLUNTARY
+> Hardware name: QEMU Standard PC (Q35 + ICH9, 2009)/Incus, BIOS unknown 02/02/2022
+> BUG: unable to handle page fault for address: fffffe76ffbaf00000
+> #PF: supervisor write access in kernel mode
+> #PF: error_code(0x0002) - not-present page
+> PGD 2e044067 P4D 3ec42067 PUD 3ec41067 PMD 3ec40067 PTE ffffffffff120
+> Oops: Oops: 0002 [#3] SMP NOPTI
+> CPU: 0 UID: 0 PID: 0 Comm: swapper/0 Not tainted 6.15.0-rc1 #3 VOLUNTARY
+> Hardware name: QEMU Standard PC (Q35 + ICH9, 2009)/Incus, BIOS unknown 02/02/2022
+>
+> We got something different though from an ubuntu VM running their 6.8
+> kernel:
+>
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> #PF: supervisor read access in kernel mode
+> #PF: error_code(0x0000) - not-present page
+> PGD 10336a067 P4D 0 
+> Oops: 0000 [#1] PREEMPT SMP NOPTI
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> #PF: supervisor read access in kernel mode
+> #PF: error_code(0x0000) - not-present page
+> PGD 10336a067 P4D 0 
+> Oops: 0000 [#2] PREEMPT SMP NOPTI
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> #PF: supervisor read access in kernel mode
+> #PF: error_code(0x0000) - not-present page
+> PGD 10336a067 P4D 0 
+> Oops: 0000 [#3] PREEMPT SMP NOPTI
+> CPU: 1 PID: 0 Comm: swapper/1 Not tainted 6.8.0-56-generic #58-Ubuntu
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> #PF: supervisor read access in kernel mode
+> #PF: error_code(0x0000) - not-present page
+> PGD 10336a067 P4D 0 
+> Oops: 0000 [#4] PREEMPT SMP NOPTI
+> CPU: 1 PID: 0 Comm: swapper/1 Not tainted 6.8.0-56-generic #58-Ubuntu
+> BUG: kernel NULL pointer dereference, address: 000000000000002828
+> #PF: supervisor read access in kernel mode
+> #PF: error_code(0x0000) - not-present page
+> PGD 10336a067 P4D 0 
+> Oops: 0000 [#5] PREEMPT SMP NOPTI
+> CPU: 1 PID: 0 Comm: swapper/1 Not tainted 6.8.0-56-generic #58-Ubuntu
+> RIP: 0010:__sprint_symbol.isra.0+0x6/0x120
+> Code: ff e8 0e 9d 00 01 66 66 2e 0f 1f 84 00 00 00 00 00 0f 1f 00 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 0f 1f 44 00 00 55 <48> 89 e5 41 57 49 89 f7 41 56 4c 63 f2 4c 8d 45 b8 48 8d 55 c0 41
+> RSP: 0018:ff25e52d000e6ff8 EFLAGS: 00000046
+> BUG: #DF stack guard page was hit at 0000000040b441e1 (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+> BUG: #DF stack guard page was hit at 000000002fed44fb (stack is 00000000a1788787..000000008e7f4216)
+>
+> CPU information from one of the boxes where we see this:
+>
+> processor	: 0
+> vendor_id	: GenuineIntel
+> cpu family	: 6
+> model		: 106
+> model name	: Intel(R) Xeon(R) Gold 5318Y CPU @ 2.10GHz
+> stepping	: 6
+> microcode	: 0xd0003f5
+> cpu MHz		: 800.000
+> cache size	: 36864 KB
+> physical id	: 0
+> siblings	: 44
+> core id		: 0
+> cpu cores	: 22
+> apicid		: 0
+> initial apicid	: 0
+> fpu		: yes
+> fpu_exception	: yes
+> cpuid level	: 27
+> wp		: yes
+> flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush dts acpi mmx fxsr sse sse2 ss ht tm pbe syscall nx pdpe1gb rdtscp lm constant_tsc art arch_perfmon pebs bts rep_good nopl xtopology nonstop_tsc cpuid aperfmperf pni pclmulqdq dtes64 monitor ds_cpl vmx smx est tm2 ssse3 sdbg fma cx16 xtpr pdcm pcid dca sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand lahf_lm abm 3dnowprefetch cpuid_fault epb cat_l3 intel_ppin ssbd mba ibrs ibpb stibp ibrs_enhanced tpr_shadow flexpriority ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb intel_pt avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local split_lock_detect wbnoinvd dtherm ida arat pln pts hwp hwp_act_window hwp_epp hwp_pkg_req vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid fsrm md_clear pconfig flush_l1d arch_capabilities
+> vmx flags	: vnmi preemption_timer posted_intr invvpid ept_x_only ept_ad ept_1gb ept_5level flexpriority apicv tsc_offset vtpr mtf vapic ept vpid unrestricted_guest vapic_reg vid ple shadow_vmcs pml ept_violation_ve ept_mode_based_exec tsc_scaling
+> bugs		: spectre_v1 spectre_v2 spec_store_bypass swapgs mmio_stale_data eibrs_pbrsb gds bhi spectre_v2_user
+> bogomips	: 4000.00
+> clflush size	: 64
+> cache_alignment	: 64
+> address sizes	: 46 bits physical, 57 bits virtual
+> power management:
+>
+> Let me know if I can provide any additional information or testing.
+>
+> Thanks,
+> Seth
+>
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 1048 bytes --]
+
+On 24.04.25 10:06, Xin Li wrote:
+> On 4/23/2025 9:05 AM, Jürgen Groß wrote:
+>>> It's not a major change, but when it is patched to use the immediate form MSR 
+>>> write instruction, it's straightforwardly streamlined.
+>>
+>> It should be rather easy to switch the current wrmsr/rdmsr paravirt patching
+>> locations to use the rdmsr/wrmsr instructions instead of doing a call to
+>> native_*msr().
+>>
+>> The case of the new immediate form could be handled the same way.
+> 
+> Actually, that is how we get this patch with the existing alternatives
+> infrastructure.  And we took a step further to also remove the pv_ops
+> MSR APIs...
+
+And this is what I'm questioning. IMHO this approach is adding more
+code by removing the pv_ops MSR_APIs just because "pv_ops is bad". And
+I believe most refusal of pv_ops is based on no longer valid reasoning.
+
+> It looks to me that you want to add a new facility to the alternatives
+> infrastructure first?
+
+Why would we need a new facility in the alternatives infrastructure?
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+On 4/23/2025 9:05 AM, Jürgen Groß wrote:
+>> It's not a major change, but when it is patched to use the immediate 
+>> form MSR write instruction, it's straightforwardly streamlined.
+> 
+> It should be rather easy to switch the current wrmsr/rdmsr paravirt 
+> patching
+> locations to use the rdmsr/wrmsr instructions instead of doing a call to
+> native_*msr().
+> 
+> The case of the new immediate form could be handled the same way.
+
+Actually, that is how we get this patch with the existing alternatives
+infrastructure.  And we took a step further to also remove the pv_ops
+MSR APIs...
+
+It looks to me that you want to add a new facility to the alternatives
+infrastructure first?
+
+
+>>> Only the "paravirt" term has been eliminated.
+>>
+>> Yes.
+>>
+>> But a PV guest doesn't operate at the highest privilege level, which
+>> means MSR instructions typically result in a #GP fault.  I actually 
+>> think the pv_ops MSR APIs are unnecessary because of this inherent
+>> limitation.
+>>
+>> Looking at the Xen MSR code, except PMU and just a few MSRs, it falls
+>> back to executes native MSR instructions.  As MSR instructions trigger
+>> #GP, Xen takes control and handles them in 2 ways:
+>>
+>>    1) emulate (or ignore) a MSR operation and skip the guest instruction.
+>>
+>>    2) inject the #GP back to guest OS and let its #GP handler handle it.
+>>       But Linux MSR exception handler just ignores the MSR instruction
+>>       (MCE MSR exception will panic).
+>>
+>> So why not let Xen handle all the details which it already tries to do?
+> 
+> Some MSRs are not handled that way, but via a kernel internal emulation.
+> And those are handled that way mostly due to performance reasons. And some
+> need special treatment.
+> 
+>> (Linux w/ such a change may not be able to run on old Xen hypervisors.)
+> 
+> Yes, and this is something to avoid.
+> 
+> And remember that Linux isn't the only PV-mode guest existing.
+> 
+>> BTW, if performance is a concern, writes to MSR_KERNEL_GS_BASE and
+>> MSR_GS_BASE anyway are hpyercalls into Xen.
+> 
+> Yes, and some other MSR writes are just NOPs with Xen-PV.
+> 
+
+I will do some cleanup and refactor first.
+
+BTW, at least we can merge the safe() APIs into the non-safe() ones.
+
+Thanks!
+     Xin
+On 4/24/2025 12:43 AM, Mi, Dapeng wrote:
+> These 2 patches are not complicated, it won't be difficult to review if
+> merging them into one as long as the commit message mentions it clearly.
+> Anyway I'm fine if you hope to keep them into two patches.
+
+Simple Small Steps...
+[-- Warning: decoded text below may be mangled, UTF-8 assumed --]
+[-- Attachment #1: Type: text/plain; charset="gb18030", Size: 8610 bytes --]
+
+Hello, I found a potential bug titled "  WARNING in release_bp_slot  " with modified syzkaller in the  Linux6.12.24(longterm maintenance, last updated on April 20, 2025).
+If you fix this issue, please add the following tag to the commit:  Reported-by: Jianzhou Zhao <xnxc22xnxc22@qq.com>,    xingwei lee <xrivendell7@gmail.com>,Penglei Jiang <superman.xpt@gmail.com>
+The commit of the kernel is : b6efa8ce222e58cfe2bbaa4e3329818c2b4bd74e
+kernel config: https://syzkaller.appspot.com/text?tag=KernelConfig&amp;x=55f8591b98dd132
+compiler: gcc version 11.4.0
+The reproduction program written in C language is at the end.
+------------[ cut here ]-----------------------------------------
+ TITLE: WARNING in release_bp_slot
+------------[ cut here ]------------
+loop2: detected capacity change from 0 to 64
+------------[ cut here ]------------
+WARNING: CPU: 1 PID: 38650 at kernel/events/hw_breakpoint.c:614 __release_bp_slot kernel/events/hw_breakpoint.c:614 [inline]
+WARNING: CPU: 1 PID: 38650 at kernel/events/hw_breakpoint.c:614 __release_bp_slot kernel/events/hw_breakpoint.c:607 [inline]
+WARNING: CPU: 1 PID: 38650 at kernel/events/hw_breakpoint.c:614 release_bp_slot+0x6b/0x90 kernel/events/hw_breakpoint.c:621
+Modules linked in:
+CPU: 1 UID: 0 PID: 38650 Comm: syz.2.3497 Not tainted 6.12.24 #3
+Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1 04/01/2014
+RIP: 0010:__release_bp_slot kernel/events/hw_breakpoint.c:614 [inline]
+RIP: 0010:__release_bp_slot kernel/events/hw_breakpoint.c:607 [inline]
+RIP: 0010:release_bp_slot+0x6b/0x90 kernel/events/hw_breakpoint.c:621
+Code: e8 8a c1 ff ff 31 ff 89 c5 89 c6 e8 7f 95 ce ff 85 ed 75 10 e8 86 9a ce ff 4c 89 e7 5d 41 5c e9 7b b7 ff ff e8 76 9a ce ff 90 &lt;0f&gt; 0b 90 e8 6d 9a ce ff 4c 89 e7 5d 41 5c e9 62 b7 ff ff e8 3d c3
+RSP: 0018:ffffc90006effc58 EFLAGS: 00010206
+RAX: 0000000000000300 RBX: ffff888027788620 RCX: ffffc90010ce2000
+RDX: 0000000000080000 RSI: ffffffff81bd948a RDI: 0000000000000005
+RBP: 00000000fffffffe R08: 0000000000000001 R09: ffff88804cc82fd8
+R10: 00000000fffffffe R11: 0000000000000000 R12: ffff88804cc83928
+R13: ffff8880277886b8 R14: ffff888027788b98 R15: 00000000ffffffa1
+FS:  00007ff310df6640(0000) GS:ffff88807ee00000(0000) knlGS:0000000000000000
+CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+CR2: 00007f2000b85150 CR3: 000000007ce38000 CR4: 0000000000752ef0
+DR0: 0000000000000000 DR1: 0000000000000000 DR2: 0000000000000000
+DR3: 0000000000000000 DR6: 00000000fffe0ff0 DR7: 0000000000000400
+PKRU: 80000000
+Call Trace:
+ <task>
+ __free_event+0x1d9/0x870 kernel/events/core.c:5330
+ perf_event_alloc.part.0+0x1225/0x3620 kernel/events/core.c:12437
+ perf_event_alloc kernel/events/core.c:12749 [inline]
+ __do_sys_perf_event_open+0x4c9/0x2c40 kernel/events/core.c:12847
+ do_syscall_x64 arch/x86/entry/common.c:52 [inline]
+ do_syscall_64+0xcb/0x250 arch/x86/entry/common.c:83
+ entry_SYSCALL_64_after_hwframe+0x77/0x7f
+RIP: 0033:0x7ff312fad5ad
+Code: 02 b8 ff ff ff ff c3 66 0f 1f 44 00 00 f3 0f 1e fa 48 89 f8 48 89 f7 48 89 d6 48 89 ca 4d 89 c2 4d 89 c8 4c 8b 4c 24 08 0f 05 &lt;48&gt; 3d 01 f0 ff ff 73 01 c3 48 c7 c1 a8 ff ff ff f7 d8 64 89 01 48
+RSP: 002b:00007ff310df5f98 EFLAGS: 00000246 ORIG_RAX: 000000000000012a
+RAX: ffffffffffffffda RBX: 00007ff3131e5fa0 RCX: 00007ff312fad5ad
+RDX: 0000000000000000 RSI: 0000000000000000 RDI: 00002000000004c0
+RBP: 00007ff313046d56 R08: 000000000000000a R09: 0000000000000000
+R10: ffffffffffffffff R11: 0000000000000246 R12: 0000000000000000
+R13: 0000000000000000 R14: 00007ff3131e5fa0 R15: 00007ff310dd6000
+ </task>
+==================================================================
+The following is the poc£º
+--------------------------------------------------------------------------------------
+#define _GNU_SOURCE
+
+#include <endian.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys syscall.h="">
+#include <sys types.h="">
+#include <unistd.h>
+
+#define BITMASK(bf_off, bf_len) (((1ull &lt;&lt; (bf_len)) - 1) &lt;&lt; (bf_off))
+#define STORE_BY_BITMASK(type, htobe, addr, val, bf_off, bf_len)               \
+  *(type*)(addr) =                                                             \
+      htobe((htobe(*(type*)(addr)) &amp; ~BITMASK((bf_off), (bf_len))) |           \
+            (((type)(val) &lt;&lt; (bf_off)) &amp; BITMASK((bf_off), (bf_len))))
+
+int main(void)
+{
+  syscall(__NR_mmap, /*addr=*/0x1ffffffff000ul, /*len=*/0x1000ul, /*prot=*/0ul,
+          /*flags=MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE*/ 0x32ul,
+          /*fd=*/(intptr_t)-1, /*offset=*/0ul);
+  syscall(__NR_mmap, /*addr=*/0x200000000000ul, /*len=*/0x1000000ul,
+          /*prot=PROT_WRITE|PROT_READ|PROT_EXEC*/ 7ul,
+          /*flags=MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE*/ 0x32ul,
+          /*fd=*/(intptr_t)-1, /*offset=*/0ul);
+  syscall(__NR_mmap, /*addr=*/0x200001000000ul, /*len=*/0x1000ul, /*prot=*/0ul,
+          /*flags=MAP_FIXED|MAP_ANONYMOUS|MAP_PRIVATE*/ 0x32ul,
+          /*fd=*/(intptr_t)-1, /*offset=*/0ul);
+  const char* reason;
+  (void)reason;
+  if (write(1, "executing program\n", sizeof("executing program\n") - 1)) {
+  }
+  *(uint32_t*)0x2000000004c0 = 5;
+  *(uint32_t*)0x2000000004c4 = 0x80;
+  *(uint8_t*)0x2000000004c8 = 8;
+  *(uint8_t*)0x2000000004c9 = 0xaf;
+  *(uint8_t*)0x2000000004ca = 0;
+  *(uint8_t*)0x2000000004cb = 8;
+  *(uint32_t*)0x2000000004cc = 0;
+  *(uint64_t*)0x2000000004d0 = 4;
+  *(uint64_t*)0x2000000004d8 = 0x402;
+  *(uint64_t*)0x2000000004e0 = 0xc;
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 0, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 1, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 2, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 3, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 4, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 5, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 6, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 7, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 8, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 9, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 10, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 11, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 12, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 13, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 14, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 15, 2);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 17, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 18, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 19, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 20, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 21, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 22, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 23, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 24, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 25, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 26, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 27, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 28, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 29, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 30, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 31, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 32, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 33, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 34, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 35, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 1, 36, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 37, 1);
+  STORE_BY_BITMASK(uint64_t, , 0x2000000004e8, 0, 38, 26);
+  *(uint32_t*)0x2000000004f0 = 2;
+  *(uint32_t*)0x2000000004f4 = 2;
+  *(uint64_t*)0x2000000004f8 = 0x8000;
+  *(uint64_t*)0x200000000500 = 2;
+  *(uint64_t*)0x200000000508 = 0x100001;
+  *(uint64_t*)0x200000000510 = 0x839;
+  *(uint32_t*)0x200000000518 = 8;
+  *(uint32_t*)0x20000000051c = 7;
+  *(uint64_t*)0x200000000520 = 0x8000000000000000;
+  *(uint32_t*)0x200000000528 = 0x5e4;
+  *(uint16_t*)0x20000000052c = 0xfefd;
+  *(uint16_t*)0x20000000052e = 0;
+  *(uint32_t*)0x200000000530 = 0x10000004;
+  *(uint32_t*)0x200000000534 = 0;
+  *(uint64_t*)0x200000000538 = 0x40000000000002;
+  syscall(__NR_perf_event_open, /*attr=*/0x2000000004c0ul, /*pid=*/0,
+          /*cpu=*/0ul, /*group=*/(intptr_t)-1,
+          /*flags=PERF_FLAG_FD_CLOEXEC|PERF_FLAG_FD_OUTPUT*/ 0xaul);
+  return 0;
+}
+
+
+
+I hope it helps.
+Best regards
+Jianzhou Zhao</unistd.h></sys></sys></string.h></stdlib.h></stdio.h></stdint.h></endian.h></superman.xpt@gmail.com></xrivendell7@gmail.com></xnxc22xnxc22@qq.com>
+
+On 4/24/2025 3:21 PM, Xin Li wrote:
+> On 4/23/2025 11:33 PM, Mi, Dapeng wrote:
+>> Could we merge this patch and previous patch into a single patch? It's
+>> unnecessary to just modify the pmu_msr_read()/pmu_msr_write() in previous
+>> patch and delete them immediately. It just wastes the effort.
+> No, it's not wasting effort, it's for easier review.
+>
+> Look at this patch, you can easily tell that pmu_msr_read() and
+> pmu_msr_write() are nothing more than pmu_msr_chk_emulated(), and
+> then removing them makes a lot of sense.
+
+These 2 patches are not complicated, it won't be difficult to review if
+merging them into one as long as the commit message mentions it clearly.
+Anyway I'm fine if you hope to keep them into two patches.
+
+
+
+On 23/04/2025 15:57, James Clark wrote:
+
+...
+
+>> FWIW I am seeing this build issue too on ARM64 and these changes have 
+>> now landed in the mainline :-(
+>>
+>> So would be great to get this fixed or reverted.
+>>
+>> Jon
+>>
+> 
+> Hi Jon,
+> 
+> I probably should have updated this thread, but the fix is here:
+> 
+> https://lore.kernel.org/linux-perf-users/20250417-james-perf-fix-gen- 
+> syscall-v1-1-1d268c923901@linaro.org/
+
+Great!
+
+Tested-by: Jon Hunter <jonathanh@nvidia.com>
+
+Thanks for fixing and sharing!
+
+Jon
+On 4/23/2025 11:33 PM, Mi, Dapeng wrote:
+> Could we merge this patch and previous patch into a single patch? It's
+> unnecessary to just modify the pmu_msr_read()/pmu_msr_write() in previous
+> patch and delete them immediately. It just wastes the effort.
+
+No, it's not wasting effort, it's for easier review.
+
+Look at this patch, you can easily tell that pmu_msr_read() and
+pmu_msr_write() are nothing more than pmu_msr_chk_emulated(), and
+then removing them makes a lot of sense.
+
+On Wed, Apr 23, 2025 at 11:19 PM Ian Rogers <irogers@google.com> wrote:
+>
+> Support for build IDs in mmap2 perf events has been present since
+> Linux v5.12:
+> https://lore.kernel.org/lkml/20210219194619.1780437-1-acme@kernel.org/
+> Build ID mmap events avoid the need to inject build IDs for DSO
+> touched by samples when perf record completes and can avoid some cases
+> of symbol mis-resolution.
+>
+> Unlike the --buildid-mmap option, this doesn't disable the build ID
+> cache but it does disable the processing of samples looking for DSOs
+> to inject build IDs for. To disable the build ID cache the -N
+> (--no-buildid-cache) option is necessary.
+>
+> Making this option the default was raised on the list in:
+> https://lore.kernel.org/linux-perf-users/CAP-5=fXP7jN_QrGUcd55_QH5J-Y-FCaJ6=NaHVtyx0oyNh8_-Q@mail.gmail.com/
+>
+> Signed-off-by: Ian Rogers <irogers@google.com>
+> ---
+>  tools/perf/builtin-record.c        | 35 +++++++++++++++++++-----------
+>  tools/perf/util/symbol_conf.h      |  2 +-
+>  tools/perf/util/synthetic-events.c | 16 +++++++-------
+>  3 files changed, 31 insertions(+), 22 deletions(-)
+>
+> diff --git a/tools/perf/builtin-record.c b/tools/perf/builtin-record.c
+> index ba20bf7c011d..0fcb0f469488 100644
+> --- a/tools/perf/builtin-record.c
+> +++ b/tools/perf/builtin-record.c
+> @@ -169,6 +169,7 @@ struct record {
+>         bool                    no_buildid_cache_set;
+>         bool                    buildid_all;
+>         bool                    buildid_mmap;
+> +       bool                    buildid_mmap_set;
+>         bool                    timestamp_filename;
+>         bool                    timestamp_boundary;
+>         bool                    off_cpu;
+> @@ -1795,7 +1796,8 @@ record__finish_output(struct record *rec)
+>                         data->dir.files[i].size = lseek(data->dir.files[i].fd, 0, SEEK_CUR);
+>         }
+>
+> -       if (!rec->no_buildid) {
+> +       /* Buildid scanning disabled or build ID in kernel and synthesized map events. */
+> +       if (!rec->no_buildid && !rec->buildid_mmap) {
+
+So I think this is wrong. It matches current behaviors, but it is
+wrong. If we don't process the kernel's mmap events the DSOs won't be
+loaded and the build ID cache won't contain the DSOs. There is also
+the bug that the sample processing to find maps to find DSOs, doesn't
+handle call chains. Given the broken nature of the build ID cache I'm
+not sure it makes any sense for perf record to be by default
+populating it. I think it probably makes sense to consider the default
+population a legacy feature and make -N the default along with
+--buildid-mmap.
+
+Thanks,
+Ian
+
+>                 process_buildids(rec);
+>
+>                 if (rec->buildid_all)
+> @@ -2966,6 +2968,8 @@ static int perf_record_config(const char *var, const char *value, void *cb)
+>                         rec->no_buildid = true;
+>                 else if (!strcmp(value, "mmap"))
+>                         rec->buildid_mmap = true;
+> +               else if (!strcmp(value, "no-mmap"))
+> +                       rec->buildid_mmap = false;
+>                 else
+>                         return -1;
+>                 return 0;
+> @@ -3349,6 +3353,7 @@ static struct record record = {
+>                 .ctl_fd_ack          = -1,
+>                 .synth               = PERF_SYNTH_ALL,
+>         },
+> +       .buildid_mmap = true,
+>  };
+>
+>  const char record_callchain_help[] = CALLCHAIN_RECORD_HELP
+> @@ -3514,8 +3519,8 @@ static struct option __record_options[] = {
+>                    "file", "vmlinux pathname"),
+>         OPT_BOOLEAN(0, "buildid-all", &record.buildid_all,
+>                     "Record build-id of all DSOs regardless of hits"),
+> -       OPT_BOOLEAN(0, "buildid-mmap", &record.buildid_mmap,
+> -                   "Record build-id in map events"),
+> +       OPT_BOOLEAN_SET(0, "buildid-mmap", &record.buildid_mmap, &record.buildid_mmap_set,
+> +                       "Legacy record build-id in map events option which is now the default. Behaves indentically to --no-buildid. Disable with --no-buildid-mmap"),
+>         OPT_BOOLEAN(0, "timestamp-filename", &record.timestamp_filename,
+>                     "append timestamp to output filename"),
+>         OPT_BOOLEAN(0, "timestamp-boundary", &record.timestamp_boundary,
+> @@ -4042,19 +4047,23 @@ int cmd_record(int argc, const char **argv)
+>                 record.opts.record_switch_events = true;
+>         }
+>
+> +       if (!rec->buildid_mmap) {
+> +               pr_debug("Disabling build id in synthesized mmap2 events.\n");
+> +               symbol_conf.no_buildid_mmap2 = true;
+> +       } else if (rec->buildid_mmap_set) {
+> +               /*
+> +                * Explicitly passing --buildid-mmap disables buildid processing
+> +                * and cache generation.
+> +                */
+> +               rec->no_buildid = true;
+> +       }
+> +       if (rec->buildid_mmap && !perf_can_record_build_id()) {
+> +               pr_warning("Missing support for build id in kernel mmap events. Disable this warning with --no-buildid-mmap\n");
+> +               rec->buildid_mmap = false;
+> +       }
+>         if (rec->buildid_mmap) {
+> -               if (!perf_can_record_build_id()) {
+> -                       pr_err("Failed: no support to record build id in mmap events, update your kernel.\n");
+> -                       err = -EINVAL;
+> -                       goto out_opts;
+> -               }
+> -               pr_debug("Enabling build id in mmap2 events.\n");
+> -               /* Enable mmap build id synthesizing. */
+> -               symbol_conf.buildid_mmap2 = true;
+>                 /* Enable perf_event_attr::build_id bit. */
+>                 rec->opts.build_id = true;
+> -               /* Disable build id cache. */
+> -               rec->no_buildid = true;
+>         }
+>
+>         if (rec->opts.record_cgroup && !perf_can_record_cgroup()) {
+> diff --git a/tools/perf/util/symbol_conf.h b/tools/perf/util/symbol_conf.h
+> index cd9aa82c7d5a..7a80d2c14d9b 100644
+> --- a/tools/perf/util/symbol_conf.h
+> +++ b/tools/perf/util/symbol_conf.h
+> @@ -43,7 +43,7 @@ struct symbol_conf {
+>                         report_individual_block,
+>                         inline_name,
+>                         disable_add2line_warn,
+> -                       buildid_mmap2,
+> +                       no_buildid_mmap2,
+>                         guest_code,
+>                         lazy_load_kernel_maps,
+>                         keep_exited_threads,
+> diff --git a/tools/perf/util/synthetic-events.c b/tools/perf/util/synthetic-events.c
+> index 8fb2ea544d3a..f48109c14235 100644
+> --- a/tools/perf/util/synthetic-events.c
+> +++ b/tools/perf/util/synthetic-events.c
+> @@ -532,7 +532,7 @@ int perf_event__synthesize_mmap_events(const struct perf_tool *tool,
+>                 event->mmap2.pid = tgid;
+>                 event->mmap2.tid = pid;
+>
+> -               if (symbol_conf.buildid_mmap2)
+> +               if (!symbol_conf.no_buildid_mmap2)
+>                         perf_record_mmap2__read_build_id(&event->mmap2, machine, false);
+>
+>                 if (perf_tool__process_synth_event(tool, event, machine, process) != 0) {
+> @@ -690,7 +690,7 @@ static int perf_event__synthesize_modules_maps_cb(struct map *map, void *data)
+>                 return 0;
+>
+>         dso = map__dso(map);
+> -       if (symbol_conf.buildid_mmap2) {
+> +       if (!symbol_conf.no_buildid_mmap2) {
+>                 size = PERF_ALIGN(dso__long_name_len(dso) + 1, sizeof(u64));
+>                 event->mmap2.header.type = PERF_RECORD_MMAP2;
+>                 event->mmap2.header.size = (sizeof(event->mmap2) -
+> @@ -734,9 +734,9 @@ int perf_event__synthesize_modules(const struct perf_tool *tool, perf_event__han
+>                 .process = process,
+>                 .machine = machine,
+>         };
+> -       size_t size = symbol_conf.buildid_mmap2
+> -               ? sizeof(args.event->mmap2)
+> -               : sizeof(args.event->mmap);
+> +       size_t size = symbol_conf.no_buildid_mmap2
+> +               ? sizeof(args.event->mmap)
+> +               : sizeof(args.event->mmap2);
+>
+>         args.event = zalloc(size + machine->id_hdr_size);
+>         if (args.event == NULL) {
+> @@ -1124,8 +1124,8 @@ static int __perf_event__synthesize_kernel_mmap(const struct perf_tool *tool,
+>                                                 struct machine *machine)
+>  {
+>         union perf_event *event;
+> -       size_t size = symbol_conf.buildid_mmap2 ?
+> -                       sizeof(event->mmap2) : sizeof(event->mmap);
+> +       size_t size = symbol_conf.no_buildid_mmap2 ?
+> +                       sizeof(event->mmap) : sizeof(event->mmap2);
+>         struct map *map = machine__kernel_map(machine);
+>         struct kmap *kmap;
+>         int err;
+> @@ -1159,7 +1159,7 @@ static int __perf_event__synthesize_kernel_mmap(const struct perf_tool *tool,
+>                 event->header.misc = PERF_RECORD_MISC_GUEST_KERNEL;
+>         }
+>
+> -       if (symbol_conf.buildid_mmap2) {
+> +       if (!symbol_conf.no_buildid_mmap2) {
+>                 size = snprintf(event->mmap2.filename, sizeof(event->mmap2.filename),
+>                                 "%s%s", machine->mmap_name, kmap->ref_reloc_sym->name) + 1;
+>                 size = PERF_ALIGN(size, sizeof(u64));
+> --
+> 2.49.0.805.g082f7c87e0-goog
+>
+On 4/23/2025 11:25 PM, Mi, Dapeng wrote:
+
+>> -bool pmu_msr_read(unsigned int msr, uint64_t *val, int *err)
+>> +bool pmu_msr_read(u32 msr, u64 *val)
+> 
+> The function name is some kind of misleading right now. With the change,
+> this function only read PMU MSR's value if it's emulated, otherwise it
+> won't really read PMU MSR. How about changing the name to
+> "pmu_emulated_msr_read" or something similar?
+
+This makes sense!
+
+>> -bool pmu_msr_read(unsigned int msr, uint64_t *val, int *err);
+>> -bool pmu_msr_write(unsigned int msr, uint32_t low, uint32_t high, int *err);
+>> +bool pmu_msr_read(u32 msr, u64 *val);
+> 
+> The prototype of pmu_msr_read() has been changed, but why there is no
+> corresponding change in its caller (xen_do_read_msr())?
+
+Good catch.  I didn't compile one by one thus missed it.
+On 23-Apr-25 12:17 PM, Luo Gengkun wrote:
+> Perf doesn't work at perf stat for hardware events:
+> 
+>  $perf stat -- sleep 1
+>  Performance counter stats for 'sleep 1':
+>              16.44 msec task-clock                       #    0.016 CPUs utilized
+>                  2      context-switches                 #  121.691 /sec
+>                  0      cpu-migrations                   #    0.000 /sec
+>                 54      page-faults                      #    3.286 K/sec
+>    <not supported>	cycles
+>    <not supported>	instructions
+>    <not supported>	branches
+>    <not supported>	branch-misses
+
+Wondering if it is worth to add this in perf test. Something like
+below?
+
+--- a/tools/perf/tests/shell/stat.sh
++++ b/tools/perf/tests/shell/stat.sh
+@@ -16,6 +16,24 @@ test_default_stat() {
+   echo "Basic stat command test [Success]"
+ }
+ 
++test_stat_count() {
++  echo "stat count test"
++
++  if ! perf list | grep -q "cpu-cycles OR cycles"
++  then
++    echo "stat count test [Skipped cpu-cycles event missing]"
++    return
++  fi
++
++  if perf stat -e cycles true 2>&1 | grep -E -q "<not supported>"
++  then
++    echo "stat count test [Failed]"
++    err=1
++    return
++  fi
++  echo "stat count test [Success]"
++}
++
+ test_stat_record_report() {
+   echo "stat record and report test"
+   if ! perf stat record -o - true | perf stat report -i - 2>&1 | \
+@@ -201,6 +219,7 @@ test_hybrid() {
+ }
+ 
+ test_default_stat
++test_stat_count
+ test_stat_record_report
+ test_stat_record_script
+ test_stat_repeat_weak_groups
+---
+
+Thanks,
+Ravi
+
+On 4/22/2025 4:21 PM, Xin Li (Intel) wrote:
+> As pmu_msr_{read,write}() are now wrappers of pmu_msr_chk_emulated(),
+> remove them and use pmu_msr_chk_emulated() directly.
+>
+> While at it, convert the data type of MSR index to u32 in functions
+> called in pmu_msr_chk_emulated().
+>
+> Suggested-by: H. Peter Anvin (Intel) <hpa@zytor.com>
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+> ---
+>  arch/x86/xen/enlighten_pv.c | 17 ++++++++++-------
+>  arch/x86/xen/pmu.c          | 24 ++++--------------------
+>  arch/x86/xen/xen-ops.h      |  3 +--
+>  3 files changed, 15 insertions(+), 29 deletions(-)
+>
+> diff --git a/arch/x86/xen/enlighten_pv.c b/arch/x86/xen/enlighten_pv.c
+> index 1418758b57ff..b5a8bceb5f56 100644
+> --- a/arch/x86/xen/enlighten_pv.c
+> +++ b/arch/x86/xen/enlighten_pv.c
+> @@ -1089,8 +1089,9 @@ static void xen_write_cr4(unsigned long cr4)
+>  static u64 xen_do_read_msr(unsigned int msr, int *err)
+>  {
+>  	u64 val = 0;	/* Avoid uninitialized value for safe variant. */
+> +	bool emulated;
+>  
+> -	if (pmu_msr_read(msr, &val, err))
+> +	if (pmu_msr_chk_emulated(msr, &val, true, &emulated) && emulated)
+
+ah, here it is.
+
+Could we merge this patch and previous patch into a single patch? It's
+unnecessary to just modify the pmu_msr_read()/pmu_msr_write() in previous
+patch and delete them immediately. It just wastes the effort.
+
+
+>  		return val;
+>  
+>  	if (err)
+> @@ -1133,6 +1134,7 @@ static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>  			     unsigned int high, int *err)
+>  {
+>  	u64 val;
+> +	bool emulated;
+>  
+>  	switch (msr) {
+>  	case MSR_FS_BASE:
+> @@ -1162,12 +1164,13 @@ static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>  	default:
+>  		val = (u64)high << 32 | low;
+>  
+> -		if (!pmu_msr_write(msr, val)) {
+> -			if (err)
+> -				*err = native_write_msr_safe(msr, low, high);
+> -			else
+> -				native_write_msr(msr, low, high);
+> -		}
+> +		if (pmu_msr_chk_emulated(msr, &val, false, &emulated) && emulated)
+> +			return;
+> +
+> +		if (err)
+> +			*err = native_write_msr_safe(msr, low, high);
+> +		else
+> +			native_write_msr(msr, low, high);
+>  	}
+>  }
+>  
+> diff --git a/arch/x86/xen/pmu.c b/arch/x86/xen/pmu.c
+> index 95caae97a394..afb02f43ee3f 100644
+> --- a/arch/x86/xen/pmu.c
+> +++ b/arch/x86/xen/pmu.c
+> @@ -128,7 +128,7 @@ static inline uint32_t get_fam15h_addr(u32 addr)
+>  	return addr;
+>  }
+>  
+> -static inline bool is_amd_pmu_msr(unsigned int msr)
+> +static bool is_amd_pmu_msr(u32 msr)
+>  {
+>  	if (boot_cpu_data.x86_vendor != X86_VENDOR_AMD &&
+>  	    boot_cpu_data.x86_vendor != X86_VENDOR_HYGON)
+> @@ -194,8 +194,7 @@ static bool is_intel_pmu_msr(u32 msr_index, int *type, int *index)
+>  	}
+>  }
+>  
+> -static bool xen_intel_pmu_emulate(unsigned int msr, u64 *val, int type,
+> -				  int index, bool is_read)
+> +static bool xen_intel_pmu_emulate(u32 msr, u64 *val, int type, int index, bool is_read)
+>  {
+>  	uint64_t *reg = NULL;
+>  	struct xen_pmu_intel_ctxt *ctxt;
+> @@ -257,7 +256,7 @@ static bool xen_intel_pmu_emulate(unsigned int msr, u64 *val, int type,
+>  	return false;
+>  }
+>  
+> -static bool xen_amd_pmu_emulate(unsigned int msr, u64 *val, bool is_read)
+> +static bool xen_amd_pmu_emulate(u32 msr, u64 *val, bool is_read)
+>  {
+>  	uint64_t *reg = NULL;
+>  	int i, off = 0;
+> @@ -298,8 +297,7 @@ static bool xen_amd_pmu_emulate(unsigned int msr, u64 *val, bool is_read)
+>  	return false;
+>  }
+>  
+> -static bool pmu_msr_chk_emulated(unsigned int msr, uint64_t *val, bool is_read,
+> -				 bool *emul)
+> +bool pmu_msr_chk_emulated(u32 msr, u64 *val, bool is_read, bool *emul)
+>  {
+>  	int type, index = 0;
+>  
+> @@ -313,20 +311,6 @@ static bool pmu_msr_chk_emulated(unsigned int msr, uint64_t *val, bool is_read,
+>  	return true;
+>  }
+>  
+> -bool pmu_msr_read(u32 msr, u64 *val)
+> -{
+> -	bool emulated;
+> -
+> -	return pmu_msr_chk_emulated(msr, val, true, &emulated) && emulated;
+> -}
+> -
+> -bool pmu_msr_write(u32 msr, u64 val)
+> -{
+> -	bool emulated;
+> -
+> -	return pmu_msr_chk_emulated(msr, &val, false, &emulated) && emulated;
+> -}
+> -
+>  static u64 xen_amd_read_pmc(int counter)
+>  {
+>  	struct xen_pmu_amd_ctxt *ctxt;
+> diff --git a/arch/x86/xen/xen-ops.h b/arch/x86/xen/xen-ops.h
+> index a1875e10be31..fde9f9d7415f 100644
+> --- a/arch/x86/xen/xen-ops.h
+> +++ b/arch/x86/xen/xen-ops.h
+> @@ -271,8 +271,7 @@ void xen_pmu_finish(int cpu);
+>  static inline void xen_pmu_init(int cpu) {}
+>  static inline void xen_pmu_finish(int cpu) {}
+>  #endif
+> -bool pmu_msr_read(u32 msr, u64 *val);
+> -bool pmu_msr_write(u32 msr, u64 val);
+> +bool pmu_msr_chk_emulated(u32 msr, u64 *val, bool is_read, bool *emul);
+>  int pmu_apic_update(uint32_t reg);
+>  u64 xen_read_pmc(int counter);
+>  
+
+On 4/22/2025 4:21 PM, Xin Li (Intel) wrote:
+> hpa found that pmu_msr_write() is actually a completely pointless
+> function [1]: all it does is shuffle some arguments, then calls
+> pmu_msr_chk_emulated() and if it returns true AND the emulated flag
+> is clear then does *exactly the same thing* that the calling code
+> would have done if pmu_msr_write() itself had returned true.  And
+> pmu_msr_read() does the equivalent stupidity.
+>
+> Remove the calls to native_{read,write}_msr{,_safe}() within
+> pmu_msr_{read,write}().  Instead reuse the existing calling code
+> that decides whether to call native_{read,write}_msr{,_safe}() based
+> on the return value from pmu_msr_{read,write}().  Consequently,
+> eliminate the need to pass an error pointer to pmu_msr_{read,write}().
+>
+> While at it, refactor pmu_msr_write() to take the MSR value as a u64
+> argument, replacing the current dual u32 arguments, because the dual
+> u32 arguments were only used to call native_write_msr{,_safe}(), which
+> has now been removed.
+>
+> [1]: https://lore.kernel.org/lkml/0ec48b84-d158-47c6-b14c-3563fd14bcc4@zytor.com/
+>
+> Suggested-by: H. Peter Anvin (Intel) <hpa@zytor.com>
+> Sign-off-by: Xin Li (Intel) <xin@zytor.com>
+> ---
+>  arch/x86/xen/enlighten_pv.c |  6 +++++-
+>  arch/x86/xen/pmu.c          | 27 ++++-----------------------
+>  arch/x86/xen/xen-ops.h      |  4 ++--
+>  3 files changed, 11 insertions(+), 26 deletions(-)
+>
+> diff --git a/arch/x86/xen/enlighten_pv.c b/arch/x86/xen/enlighten_pv.c
+> index 9fbe187aff00..1418758b57ff 100644
+> --- a/arch/x86/xen/enlighten_pv.c
+> +++ b/arch/x86/xen/enlighten_pv.c
+> @@ -1132,6 +1132,8 @@ static void set_seg(unsigned int which, unsigned int low, unsigned int high,
+>  static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>  			     unsigned int high, int *err)
+>  {
+> +	u64 val;
+> +
+>  	switch (msr) {
+>  	case MSR_FS_BASE:
+>  		set_seg(SEGBASE_FS, low, high, err);
+> @@ -1158,7 +1160,9 @@ static void xen_do_write_msr(unsigned int msr, unsigned int low,
+>  		break;
+>  
+>  	default:
+> -		if (!pmu_msr_write(msr, low, high, err)) {
+> +		val = (u64)high << 32 | low;
+> +
+> +		if (!pmu_msr_write(msr, val)) {
+>  			if (err)
+>  				*err = native_write_msr_safe(msr, low, high);
+>  			else
+> diff --git a/arch/x86/xen/pmu.c b/arch/x86/xen/pmu.c
+> index 9c1682af620a..95caae97a394 100644
+> --- a/arch/x86/xen/pmu.c
+> +++ b/arch/x86/xen/pmu.c
+> @@ -313,37 +313,18 @@ static bool pmu_msr_chk_emulated(unsigned int msr, uint64_t *val, bool is_read,
+>  	return true;
+>  }
+>  
+> -bool pmu_msr_read(unsigned int msr, uint64_t *val, int *err)
+> +bool pmu_msr_read(u32 msr, u64 *val)
+
+The function name is some kind of misleading right now. With the change,
+this function only read PMU MSR's value if it's emulated, otherwise it
+won't really read PMU MSR. How about changing the name to
+"pmu_emulated_msr_read" or something similar?
+
+
+>  {
+>  	bool emulated;
+>  
+> -	if (!pmu_msr_chk_emulated(msr, val, true, &emulated))
+> -		return false;
+> -
+> -	if (!emulated) {
+> -		*val = err ? native_read_msr_safe(msr, err)
+> -			   : native_read_msr(msr);
+> -	}
+> -
+> -	return true;
+> +	return pmu_msr_chk_emulated(msr, val, true, &emulated) && emulated;
+>  }
+>  
+> -bool pmu_msr_write(unsigned int msr, uint32_t low, uint32_t high, int *err)
+> +bool pmu_msr_write(u32 msr, u64 val)
+
+ditto.
+
+
+>  {
+> -	uint64_t val = ((uint64_t)high << 32) | low;
+>  	bool emulated;
+>  
+> -	if (!pmu_msr_chk_emulated(msr, &val, false, &emulated))
+> -		return false;
+> -
+> -	if (!emulated) {
+> -		if (err)
+> -			*err = native_write_msr_safe(msr, low, high);
+> -		else
+> -			native_write_msr(msr, low, high);
+> -	}
+> -
+> -	return true;
+> +	return pmu_msr_chk_emulated(msr, &val, false, &emulated) && emulated;
+>  }
+>  
+>  static u64 xen_amd_read_pmc(int counter)
+> diff --git a/arch/x86/xen/xen-ops.h b/arch/x86/xen/xen-ops.h
+> index dc886c3cc24d..a1875e10be31 100644
+> --- a/arch/x86/xen/xen-ops.h
+> +++ b/arch/x86/xen/xen-ops.h
+> @@ -271,8 +271,8 @@ void xen_pmu_finish(int cpu);
+>  static inline void xen_pmu_init(int cpu) {}
+>  static inline void xen_pmu_finish(int cpu) {}
+>  #endif
+> -bool pmu_msr_read(unsigned int msr, uint64_t *val, int *err);
+> -bool pmu_msr_write(unsigned int msr, uint32_t low, uint32_t high, int *err);
+> +bool pmu_msr_read(u32 msr, u64 *val);
+
+The prototype of pmu_msr_read() has been changed, but why there is no
+corresponding change in its caller (xen_do_read_msr())?
+
+
+> +bool pmu_msr_write(u32 msr, u64 val);
+>  int pmu_apic_update(uint32_t reg);
+>  u64 xen_read_pmc(int counter);
+>  
+Support for build IDs in mmap2 perf events has been present since
+Linux v5.12:
+https://lore.kernel.org/lkml/20210219194619.1780437-1-acme@kernel.org/
+Build ID mmap events avoid the need to inject build IDs for DSO
+touched by samples when perf record completes and can avoid some cases
+of symbol mis-resolution.
+
+Unlike the --buildid-mmap option, this doesn't disable the build ID
+cache but it does disable the processing of samples looking for DSOs
+to inject build IDs for. To disable the build ID cache the -N
+(--no-buildid-cache) option is necessary.
+
+Making this option the default was raised on the list in:
+https://lore.kernel.org/linux-perf-users/CAP-5=fXP7jN_QrGUcd55_QH5J-Y-FCaJ6=NaHVtyx0oyNh8_-Q@mail.gmail.com/
+The dso_id previously contained the major, minor, inode and inode
+generation information from a mmap2 event - the inode generation would
+be zero when reading from /proc/pid/maps. The build_id was in the
+dso. With build ID mmap2 events these fields wouldn't be initialized
+which would largely mean the special empty case where any dso would
+match for equality. This isn't desirable as if a dso is replaced we
+want the comparison to yield a difference.
+
+To support detecting the difference between DSOs based on build_id,
+move the build_id out of the DSO and into the dso_id. The dso_id is
+also stored in the DSO so nothing is lost. Capture in the dso_id what
+parts have been initialized and rename dso_id__inject to
+dso_id__improve_id so that it is clear the dso_id is being improved
+upon with additional information. With the build_id in the dso_id, use
+memcmp to compare for equality.
+Pass in a size argument rather than implying all build id strings must
+be SBUILD_ID_SIZE.
+Warning when the build_id data would be overflowed would lead to
+memory corruption, switch to truncation.
+Later clean up of the dso_id to include a build_id will suffer from
+alignment and size issues. The size can only hold up to a value of
+BUILD_ID_SIZE (20) and the mmap2 event uses a byte for the value.
+Build ID mmap2 events have been available since Linux v5.12 and avoid
+post-processing the perf.data file to inject build IDs for DSOs
+referenced by samples. Enable these by default as discussed in:
+https://lore.kernel.org/linux-perf-users/CAP-5=fXP7jN_QrGUcd55_QH5J-Y-FCaJ6=NaHVtyx0oyNh8_-Q@mail.gmail.com/
+
+The dso_id is used to indentify a DSO that may change by being
+overwritten. The inode generation isn't present in /proc/pid/maps and
+so was already only optionally filled in. With build ID mmap events
+the other major, minor and inode varialbes aren't filled in. Change
+the dso_id implementation to make optional values explicit, rather
+than injecting a dso_id we want to improve it during find operations,
+add the buildid to the dso_id for sorting and so that matching fails
+when build IDs vary between DSOs.
+
+Other minor bits of build_id clean up.
+In order to fix the race condition between exit_mmap and
+perf_output_sample below, forbidding to copy the user stack
+of an exiting process.
+
+ Internal error: synchronous external abort: ffffffff96000010 [#1]
+  PREEMPT SMP
+ CPU: 3 PID: 2651 Comm: binder:2649_1 Tainted: G        W  OE
+  5.15.149-android13-8-00008-gbe074b05e5af-ab12096863 #1
+ Hardware name: Spreadtrum UMS9230 1H10 SoC (DT)
+ pstate: 204000c5 (nzCv daIF +PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+ pc : __arch_copy_from_user+0x180/0x218
+ lr : arch_perf_out_copy_user+0xb0/0x17c
+ sp : ffffffc00801baf0
+ x29: ffffffc00801baf0 x28: ffffffc00801bbf8 x27: ffffffc00801bbe8
+ x26: 0000000000000000 x25: 0000000000001000 x24: 000000000000feb8
+ x23: 00000000000005f0 x22: ffffff80613c8000 x21: ffffff8143102a10
+ x20: 0000007c239643c0 x19: 00000000000005f0 x18: ffffffc00801d058
+ x17: ffffffc16e677000 x16: ffffffc008018000 x15: 0000007c239643c0
+ x14: 0000000000000002 x13: 0000000000000003 x12: ffffffc008000000
+ x11: ffffff8000090000 x10: ffffffc008090000 x9 : 0000007fffffffff
+ x8 : 0000007c239643c0 x7 : 000000000000feb8 x6 : ffffff8143102a10
+ x5 : ffffff8143103000 x4 : 0000000000000000 x3 : ffffff8093cad140
+ x2 : 0000000000000570 x1 : 0000007c239643c0 x0 : ffffff8143102a10
+ Call trace:
+  __arch_copy_from_user+0x180/0x218
+  perf_output_sample+0x14e4/0x1904
+  perf_event_output_forward+0x90/0x130
+  __perf_event_overflow+0xc8/0x17c
+  perf_swevent_hrtimer+0x124/0x290
+  __run_hrtimer+0x134/0x4a0
+  hrtimer_interrupt+0x2e4/0x560
+  arch_timer_handler_phys+0x5c/0xa0
+  handle_percpu_devid_irq+0xc0/0x374
+  handle_domain_irq+0xd8/0x160
+  gic_handle_irq.34215+0x58/0x26c
+  call_on_irq_stack+0x3c/0x70
+  do_interrupt_handler+0x44/0xa0
+  el1_interrupt+0x34/0x64
+  el1h_64_irq_handler+0x1c/0x2c
+  el1h_64_irq+0x7c/0x80
+  release_pages+0xac/0x9b4
+  tlb_finish_mmu+0xb0/0x238
+  exit_mmap+0x1b8/0x538
+  __mmput+0x40/0x274
+  mmput+0x40/0x134
+  exit_mm+0x3bc/0x72c
+  do_exit+0x294/0x1160
+  do_group_exit+0xc8/0x174
+  get_signal+0x830/0x95c
+  do_signal+0x9c/0x2a8
+  do_notify_resume+0x98/0x1ac
+  el0_svc+0x5c/0x84
+  el0t_64_sync_handler+0x88/0xec
+  el0t_64_sync+0x1b8/0x1bc
+On 4/23/2025 8:51 AM, Dave Hansen wrote:
+> On 4/22/25 01:21, Xin Li (Intel) wrote:
+>>   static __always_inline void sev_es_wr_ghcb_msr(u64 val)
+>>   {
+>> -	u32 low, high;
+>> -
+>> -	low  = (u32)(val);
+>> -	high = (u32)(val >> 32);
+>> -
+>> -	native_wrmsr(MSR_AMD64_SEV_ES_GHCB, low, high);
+>> +	native_wrmsrq(MSR_AMD64_SEV_ES_GHCB, val);
+>>   }
+> 
+> A note on ordering: Had this been a native_wrmsr()=>__wrmsr()
+> conversion, it could be sucked into the tree easily before the big
+> __wrmsr()=>native_wrmsrq() conversion.
+
+Can't reorder the 2 patches, because __wrmsr() takes two u32 arguments
+and the split has to be done explicitly in sev_es_wr_ghcb_msr().
+
+Thanks!
+     Xin
+
+
+On Thu, Apr 3, 2025 at 12:25 PM Ian Rogers <irogers@google.com> wrote:
+>
+> On Thu, Mar 27, 2025 at 4:01 PM Chun-Tse Shao <ctshao@google.com> wrote:
+> >
+> > The `stat+uniquify.sh` test retrieves all uniquified `clockticks` events
+> > from `perf list -v clockticks` and check if `perf stat -e clockticks -A`
+> > contains all of them.
+> >
+> > Signed-off-by: Chun-Tse Shao <ctshao@google.com>
+> > ---
+> >  .../tests/shell/stat+event_uniquifying.sh     | 69 +++++++++++++++++++
+> >  1 file changed, 69 insertions(+)
+> >  create mode 100755 tools/perf/tests/shell/stat+event_uniquifying.sh
+> >
+> > diff --git a/tools/perf/tests/shell/stat+event_uniquifying.sh b/tools/perf/tests/shell/stat+event_uniquifying.sh
+> > new file mode 100755
+> > index 000000000000..5ec35c52b7d9
+> > --- /dev/null
+> > +++ b/tools/perf/tests/shell/stat+event_uniquifying.sh
+> > @@ -0,0 +1,69 @@
+> > +#!/bin/bash
+> > +# perf stat events uniquifying
+> > +# SPDX-License-Identifier: GPL-2.0
+> > +
+> > +set -e
+> > +
+> > +stat_output=$(mktemp /tmp/__perf_test.stat_output.XXXXX)
+> > +perf_tool=perf
+> > +err=0
+> > +
+> > +test_event_uniquifying() {
+> > +  # We use `clockticks` to verify the uniquify behavior.
+> > +  event="clockticks"
+>
+> This event is generally only available on Intel, not AMD or ARM, so we
+> will need to skip if it isn't present.
+>
+> > +  # If the `-A` option is added, the event should be uniquified.
+> > +  #
+> > +  # $perf list -v clockticks
+> > +  #
+> > +  # List of pre-defined events (to be used in -e or -M):
+> > +  #
+> > +  #   uncore_imc_0/clockticks/                           [Kernel PMU event]
+> > +  #   uncore_imc_1/clockticks/                           [Kernel PMU event]
+> > +  #   uncore_imc_2/clockticks/                           [Kernel PMU event]
+> > +  #   uncore_imc_3/clockticks/                           [Kernel PMU event]
+> > +  #   uncore_imc_4/clockticks/                           [Kernel PMU event]
+> > +  #   uncore_imc_5/clockticks/                           [Kernel PMU event]
+> > +  #
+> > +  #   ...
+> > +  #
+> > +  # $perf stat -e clockticks -A -- true
+> > +  #
+> > +  #  Performance counter stats for 'system wide':
+> > +  #
+> > +  # CPU0            3,773,018      uncore_imc_0/clockticks/
+> > +  # CPU0            3,609,025      uncore_imc_1/clockticks/
+> > +  # CPU0                    0      uncore_imc_2/clockticks/
+> > +  # CPU0            3,230,009      uncore_imc_3/clockticks/
+> > +  # CPU0            3,049,897      uncore_imc_4/clockticks/
+> > +  # CPU0                    0      uncore_imc_5/clockticks/
+> > +  #
+> > +  #        0.002029828 seconds time elapsed
+> > +
+> > +  echo "stat event uniquifying test"
+> > +  uniquified_event_array=()
+> > +
+> > +  # Check how many uniquified events.
+> > +  while IFS= read -r line; do
+> > +    uniquified_event=$(echo "$line" | awk '{print $1}')
+> > +    uniquified_event_array+=("${uniquified_event}")
+> > +  done < <(${perf_tool} list -v ${event} | grep "\[Kernel PMU event\]")
+>
+> Shouldn't the array contain every sysfs event that doesn't have a json
+> component? They may or may not be uniquified so I think the array name
+> is misleading.
+>
+> > +  perf_command="${perf_tool} stat -e $event -A -o ${stat_output} -- true"
+> > +  $perf_command
+> > +
+> > +  # Check the output contains all uniquified events.
+> > +  for uniquified_event in "${uniquified_event_array[@]}"; do
+> > +    if ! cat "${stat_output}" | grep -q "${uniquified_event}"; then
+>
+> Why not pass the file directly to grep?
+> Should some of the events not show in the stat output as you only
+> asked for the clockticks event? I'm not sure how this test can pass
+> currently.
+>
+> Thanks,
+> Ian
+>
+Thanks for your comment, Ian.
+
+I tried to run `perf list -v clockticks` and grep for all events which
+have `[Kernel PMU event]` tag.
+Ideally, that should retrieve all uniquified clockticks events.
+Then I ran `perf stat -e clockticks` to check if all events from `perf
+list` are showing.
+
+I randomly picked some machines from different arches and it seems
+work. Let me know if you have a better idea.
+
+-CT
+
+> > +      echo "Event is not uniquified [Failed]"
+> > +      echo "${perf_command}"
+> > +      cat "${stat_output}"
+> > +      err=1
+> > +      break
+> > +    fi
+> > +  done
+> > +}
+> > +
+> > +test_event_uniquifying
+> > +rm -f "${stat_output}"
+> > +exit $err
+> > --
+> > 2.49.0.472.ge94155a9ec-goog
+> >
+Ping.
+
+Thanks,
+CT
+
+
+On Mon, Apr 14, 2025 at 10:43 AM Ian Rogers <irogers@google.com> wrote:
+>
+> On Mon, Apr 14, 2025 at 10:39 AM Chun-Tse Shao <ctshao@google.com> wrote:
+> >
+> > `perf report` currently halts with an error when encountering
+> > unsupported new event types (`event.type >= PERF_RECORD_HEADER_MAX`).
+> > This patch modifies the behavior to skip these samples and continue
+> > processing the remaining events. Additionally, stops reporting if the
+> > new event size is not 8-byte aligned.
+> >
+> > Signed-off-by: Chun-Tse Shao <ctshao@google.com>
+> > Suggested-by: Arnaldo Carvalho de Melo <acme@kernel.org>
+> > Suggested-by: Namhyung Kim <namhyung@kernel.org>
+>
+> Reviewed-by: Ian Rogers <irogers@google.com>
+>
+> Thanks,
+> Ian
+>
+> > ---
+> >  tools/perf/util/session.c | 13 +++++++++++--
+> >  1 file changed, 11 insertions(+), 2 deletions(-)
+> >
+> > diff --git a/tools/perf/util/session.c b/tools/perf/util/session.c
+> > index 60fb9997ea0d..ba32f8461a4b 100644
+> > --- a/tools/perf/util/session.c
+> > +++ b/tools/perf/util/session.c
+> > @@ -1639,8 +1639,17 @@ static s64 perf_session__process_event(struct perf_session *session,
+> >         if (session->header.needs_swap)
+> >                 event_swap(event, evlist__sample_id_all(evlist));
+> >
+> > -       if (event->header.type >= PERF_RECORD_HEADER_MAX)
+> > -               return -EINVAL;
+> > +       if (event->header.type >= PERF_RECORD_HEADER_MAX) {
+> > +               /* perf should not support unaligned event, stop here. */
+> > +               if (event->header.size % sizeof(u64))
+> > +                       return -EINVAL;
+> > +
+> > +               /* This perf is outdated and does not support the latest event type. */
+> > +               ui__warning("Unsupported type %u, please considering update perf.\n",
+> > +                           event->header.type);
+> > +               /* Skip unsupported event by returning its size. */
+> > +               return event->header.size;
+> > +       }
+> >
+> >         events_stats__inc(&evlist->stats, event->header.type);
+> >
+> > --
+> > 2.49.0.604.gff1f9ca942-goog
+> >
+
+
+On 2025-04-21 10:56 a.m., Liang, Kan wrote:
+> 
+> 
+> On 2025-04-19 12:50 a.m., Luo Gengkun wrote:
+>>
+>> On 2025/4/19 10:25, Luo Gengkun wrote:
+>>>
+>>> On 2025/4/14 22:29, Liang, Kan wrote:
+>>>>
+>>>> On 2025-04-12 5:14 a.m., Luo Gengkun wrote:
+>>>>> The following perf command can trigger a warning on
+>>>>> intel_pmu_lbr_counters_reorder.
+>>>>>
+>>>>>   # perf record -e "{cpu-clock,cycles/call-graph="lbr"/}" -- sleep 1
+>>>>>
+>>>>> The reason is that a lbr event are placed in non lbr group. And the
+>>>>> previous implememtation cannot force the leader to be a lbr event in
+>>>>> this
+>>>>> case.
+>>>> Perf should only force the LBR leader for the branch counters case, so
+>>>> perf only needs to reset the LBRs for the leader.
+>>>> I don't think the leader restriction should be applied to other cases.
+>>>
+>>> Yes, the commit message should be updated.  The code implementation only
+>>>
+>>> restricts the leader to be an LBRs.
+>>>
+>>>>> And is_branch_counters_group will check if the group_leader supports
+>>>>> BRANCH_COUNTERS.
+>>>>> So if a software event becomes a group_leader, which
+>>>>> hw.flags is -1, this check will alway pass.
+>>>> I think the default flags for all events is 0. Can you point me to where
+>>>> it is changed to -1?
+>>>>
+>>>> Thanks,
+>>>> Kan>
+>>>
+>>> The hw_perf_event contains a union, hw.flags is used only for hardware
+>>> events.
+>>>
+>>> For the software events, it uses hrtimer. Therefor, when
+>>> perf_swevent_init_hrtimer
+>>>
+>>> is called, it changes the value of hw.flags too.
+>>>
+>>>
+>>> Thanks,
+>>>
+>>> Gengkun
+>>
+>>
+>> It seems that using union is dangerous because different types of
+>> perf_events can be
+>> placed in the same group.
+> 
+> Only the PMU with perf_sw_context can be placed in the same group with
+> other types.
+> 
+>> Currently, a large number of codes directly
+>> access the hw
+>> of the leader, which is insecure. 
+> 
+> For X86, the topdown, ACR and branch counters will touch the
+> leader.hw->flags. The topdown and ACR have already checked the leader
+> before updating the flags. The branch counters missed it. I think a
+> check is required for the branch counters as well, which should be good
+> enough to address the issue.
+> 
+> diff --git a/arch/x86/events/intel/core.c b/arch/x86/events/intel/core.c
+> index 16f8aea33243..406f58b3b5d4 100644
+> --- a/arch/x86/events/intel/core.c
+> +++ b/arch/x86/events/intel/core.c
+> @@ -4256,6 +4256,12 @@ static int intel_pmu_hw_config(struct perf_event
+> *event)
+>  		 * group, which requires the extra space to store the counters.
+>  		 */
+>  		leader = event->group_leader;
+> +		/*
+> +		 * The leader's hw.flags will be used to determine a
+> +		 * branch counter logging group. Force it a X86 event.
+> +		 */
+> +		if (!is_x86_event(leader))
+> +			return -EINVAL;
+>  		if (branch_sample_call_stack(leader))
+>  			return -EINVAL;
+>  		if (branch_sample_counters(leader)) {
+>
+
+The above check may not enough, since the
+intel_pmu_lbr_counters_reorder() can be invoked without branch counters
+event.
+
+I've posted a fix to address the issue. Please take a look.
+https://lore.kernel.org/lkml/20250423221015.268949-1-kan.liang@linux.intel.com/
+
+Thanks,
+Kan
+>> This part of the logic needs to be
+>> redesigned to void
+>> similar problems. And I am happy to work for this.
+>>
+> 
+> OK. Please share your idea.
+> 
+> Thanks,
+> Kan
+>>
+>> Thanks,
+>> Gengkun
+>>>>> To fix this problem, using has_branch_stack to judge if leader is lbr
+>>>>> event.
+>>>>>
+>>>>> Fixes: 33744916196b ("perf/x86/intel: Support branch counters logging")
+>>>>> Signed-off-by: Luo Gengkun <luogengkun@huaweicloud.com>
+>>>>> ---
+>>>>>   arch/x86/events/intel/core.c | 14 +++++++-------
+>>>>>   1 file changed, 7 insertions(+), 7 deletions(-)
+>>>>>
+>>>>> diff --git a/arch/x86/events/intel/core.c b/arch/x86/events/intel/
+>>>>> core.c
+>>>>> index 09d2d66c9f21..c6b394019e54 100644
+>>>>> --- a/arch/x86/events/intel/core.c
+>>>>> +++ b/arch/x86/events/intel/core.c
+>>>>> @@ -4114,6 +4114,13 @@ static int intel_pmu_hw_config(struct
+>>>>> perf_event *event)
+>>>>>               event->hw.flags |= PERF_X86_EVENT_NEEDS_BRANCH_STACK;
+>>>>>       }
+>>>>>   +    /*
+>>>>> +     * Force the leader to be a LBR event. So LBRs can be reset
+>>>>> +     * with the leader event. See intel_pmu_lbr_del() for details.
+>>>>> +     */
+>>>>> +    if (has_branch_stack(event) && !has_branch_stack(event-
+>>>>>> group_leader))
+>>>>> +        return -EINVAL;
+>>>>> +
+>>>>>       if (branch_sample_counters(event)) {
+>>>>>           struct perf_event *leader, *sibling;
+>>>>>           int num = 0;
+>>>>> @@ -4157,13 +4164,6 @@ static int intel_pmu_hw_config(struct
+>>>>> perf_event *event)
+>>>>>                 ~(PERF_SAMPLE_BRANCH_PLM_ALL |
+>>>>>                   PERF_SAMPLE_BRANCH_COUNTERS)))
+>>>>>               event->hw.flags  &= ~PERF_X86_EVENT_NEEDS_BRANCH_STACK;
+>>>>> -
+>>>>> -        /*
+>>>>> -         * Force the leader to be a LBR event. So LBRs can be reset
+>>>>> -         * with the leader event. See intel_pmu_lbr_del() for details.
+>>>>> -         */
+>>>>> -        if (!intel_pmu_needs_branch_stack(leader))
+>>>>> -            return -EINVAL;
+>>>>>       }
+>>>>>         if (intel_pmu_needs_branch_stack(event)) {
+>>
+> 
+> 
+
+On Wed, Apr 23, 2025 at 10:41:55AM -0700, Namhyung Kim wrote:
+> Hi Arnaldo,
+> 
+> On Wed, Apr 23, 2025 at 01:26:48PM -0300, Arnaldo Carvalho de Melo wrote:
+> > On Fri, Mar 28, 2025 at 06:46:36PM -0700, Howard Chu wrote:
+> > > On Tue, Mar 25, 2025 at 9:40 PM Namhyung Kim <namhyung@kernel.org> wrote:
+> > > >      syscall            calls  errors  total       min       avg       max       stddev
+> > > >                                        (msec)    (msec)    (msec)    (msec)        (%)
+> > > >      --------------- --------  ------ -------- --------- --------- ---------     ------
+> > > >      epoll_wait           561      0  4530.843     0.000     8.076   520.941     18.75%
+> > > >      futex                693     45  4317.231     0.000     6.230   500.077     21.98%
+> > > >      poll                 300      0  1040.109     0.000     3.467   120.928     17.02%
+> > > >      clock_nanosleep        1      0  1000.172  1000.172  1000.172  1000.172      0.00%
+> > > >      ppoll                360      0   872.386     0.001     2.423   253.275     41.91%
+> > > >      epoll_pwait           14      0   384.349     0.001    27.453   380.002     98.79%
+> > > >      pselect6              14      0   108.130     7.198     7.724     8.206      0.85%
+> > > >      nanosleep             39      0    43.378     0.069     1.112    10.084     44.23%
+> > > >      ...
+> > 
+> > I added the following to align sched_[gs]etaffinity,
+> 
+> Thanks for processing the patch and updating this.  But I'm afraid there
+> are more syscalls with longer names and this is not the only place to
+> print the syscall names.  Also I think we need to update length of the
+> time fields.  So I prefer handling them in a separate patch later.
+
+Fair enough, I'm leaving the patch as-is.
+
+- Arnaldo
+On Wed, Apr 9, 2025 at 11:49 PM Namhyung Kim <namhyung@kernel.org> wrote:
+>
+> Hi Ian,
+>
+> On Wed, Apr 09, 2025 at 09:45:29PM -0700, Ian Rogers wrote:
+> > The "PMU JSON event tests" have been running slowly, these changes
+> > target improving them with an improvement of the test running 8 to 10
+> > times faster.
+> >
+> > The first patch changes from searching through all aliases by name in
+> > a list to using a hashmap. Doing a fast hashmap__find means testing
+> > for having an event needn't load from disk if an event is already
+> > present.
+> >
+> > The second patch switch the fncache to use a hashmap rather than its
+> > own hashmap with a limited number of buckets. When there are many
+> > filename queries, such as with a test, there are many collisions with
+> > the previous fncache approach leading to linear searching of the
+> > entries.
+> >
+> > The final patch adds a find function for metrics. Normally metrics can
+> > match by name and group, however, only name matching happens when one
+> > metric refers to another. As we test every "id" in a metric to see if
+> > it is a metric, the find function can dominate performance as it
+> > linearly searches all metrics. Add a find function for the metrics
+> > table so that a metric can be found by name with a binary search.
+> >
+> > Before these changes:
+> > ```
+> > $ time perf test -v 10
+> >  10: PMU JSON event tests                                            :
+> >  10.1: PMU event table sanity                                        : Ok
+> >  10.2: PMU event map aliases                                         : Ok
+> >  10.3: Parsing of PMU event table metrics                            : Ok
+> >  10.4: Parsing of PMU event table metrics with fake PMUs             : Ok
+> >  10.5: Parsing of metric thresholds with fake PMUs                   : Ok
+> >
+> > real    0m18.499s
+> > user    0m18.150s
+> > sys     0m3.273s
+> > ```
+> >
+> > After these changes:
+> > ```
+> > $ time perf test -v 10
+> >  10: PMU JSON event tests                                            :
+> >  10.1: PMU event table sanity                                        : Ok
+> >  10.2: PMU event map aliases                                         : Ok
+> >  10.3: Parsing of PMU event table metrics                            : Ok
+> >  10.4: Parsing of PMU event table metrics with fake PMUs             : Ok
+> >  10.5: Parsing of metric thresholds with fake PMUs                   : Ok
+> >
+> > real    0m2.338s
+> > user    0m1.797s
+> > sys     0m2.186s
+> > ```
+>
+> Great, I also see the speedup on my machine from 32s to 3s.
+>
+> Tested-by: Namhyung Kim <namhyung@kernel.org>
+
+Ping.
+
+Thanks,
+Ian
+
+> Thanks,
+> Namhyung
+>
+> >On Mon, Mar 31, 2025 at 12:37:18AM -0700, Namhyung Kim wrote:
+> Hello,
+> 
+> This is to remove arbitrary restrictions in the hierarchy mode.
+> 
+> The -F/--fields option is to specify output fields and sort keys in perf
+> report exactly what users want.  It was not allowed in the hierarchy mode
+> because it missed to handle the field correctly.
+> 
+> This patchset addresses that problem and allows the option.  It'd make
+> the output more flexible.  For example, this is possible:
+> 
+>   $ perf report -F overhead,comm,dso -H
+
+Thanks, tested and applied to perf-tools-next.
+
+- Arnaldo
+On Tue, Apr 22, 2025 at 7:21 AM Leo Yan <leo.yan@arm.com> wrote:
+>
+> On Mon, Apr 21, 2025 at 02:58:18PM -0700, Yabin Cui wrote:
+> > The cs_etm PMU, regardless of the underlying trace sink (ETF, ETR or
+> > TRBE), doesn't require contiguous pages for its AUX buffer.
+>
+> Though contiguous pages are not mandatory for TRBE, I would set the
+> PERF_PMU_CAP_AUX_NO_SG flag for it.  This can potentially benefit
+> performance.
+
+As explained in the patch 1/2, my use case periodically collects ETM data
+from the field (using both TRBE and ETR), and needs to reduce memory
+fragmentation. If the performance impact is big, we can make it user
+configurable. Otherwise, shall we default it to non-contiguous pages?
+
+>
+> For non per CPU sinks, it is fine to allocate non-contiguous pages.
+>
+> Thanks,
+> Leo
+>
+> > This patch adds the PERF_PMU_CAP_AUX_NON_CONTIGUOUS_PAGES capability
+> > to the cs_etm PMU. This allows the kernel to allocate non-contiguous
+> > pages for the AUX buffer, reducing memory fragmentation when using
+> > cs_etm.
+> >
+> > Signed-off-by: Yabin Cui <yabinc@google.com>
+> > ---
+> >  drivers/hwtracing/coresight/coresight-etm-perf.c | 3 ++-
+> >  1 file changed, 2 insertions(+), 1 deletion(-)
+> >
+> > diff --git a/drivers/hwtracing/coresight/coresight-etm-perf.c b/drivers/hwtracing/coresight/coresight-etm-perf.c
+> > index f4cccd68e625..c98646eca7f8 100644
+> > --- a/drivers/hwtracing/coresight/coresight-etm-perf.c
+> > +++ b/drivers/hwtracing/coresight/coresight-etm-perf.c
+> > @@ -899,7 +899,8 @@ int __init etm_perf_init(void)
+> >       int ret;
+> >
+> >       etm_pmu.capabilities            = (PERF_PMU_CAP_EXCLUSIVE |
+> > -                                        PERF_PMU_CAP_ITRACE);
+> > +                                        PERF_PMU_CAP_ITRACE |
+> > +                                        PERF_PMU_CAP_AUX_NON_CONTIGUOUS_PAGES);
+> >
+> >       etm_pmu.attr_groups             = etm_pmu_attr_groups;
+> >       etm_pmu.task_ctx_nr             = perf_sw_context;
+> > --
+> > 2.49.0.805.g082f7c87e0-goog
+> >
+> >
+On Tue, Apr 22, 2025 at 7:10 AM Leo Yan <leo.yan@arm.com> wrote:
+>
+> On Tue, Apr 22, 2025 at 02:49:54PM +0200, Ingo Molnar wrote:
+>
+> [...]
+>
+> > > Hi Yabin,
+> > >
+> > > I was wondering if this is just the opposite of
+> > > PERF_PMU_CAP_AUX_NO_SG, and that order 0 should be used by default
+> > > for all devices to solve the issue you describe. Because we already
+> > > have PERF_PMU_CAP_AUX_NO_SG for devices that need contiguous pages.
+> > > Then I found commit 5768402fd9c6 ("perf/ring_buffer: Use high order
+> > > allocations for AUX buffers optimistically") that explains that the
+> > > current allocation strategy is an optimization.
+> > >
+> > > Your change seems to decide that for certain devices we want to
+> > > optimize for fragmentation rather than performance. If these are
+> > > rarely used features specifically when looking at performance should
+> > > we not continue to optimize for performance? Or at least make it user
+> > > configurable?
+> >
+> > So there seems to be 3 categories:
+> >
+> >  - 1) Must have physically contiguous AUX buffers, it's a hardware ABI.
+> >       (PERF_PMU_CAP_AUX_NO_SG for Intel BTS and PT.)
+> >
+> >  - 2) Would be nice to have continguous AUX buffers, for a bit more
+> >       performance.
+> >
+> >  - 3) Doesn't really care.
+> >
+> > So we do have #1, and it appears Yabin's usecase is #3?
+
+Yes, in my usecase, I care much more about MM-friendly than a little potential
+performance when using PMU. It's not a rarely used feature. On Android, we
+collect ETM data periodically on internal user devices for AutoFDO optimization
+(for both userspace libraries and the kernel). Allocating a large
+chunk of contiguous
+AUX pages (4M for each CPU) periodically is almost unbearable. The kernel may
+need to kill many processes to fulfill the request. It affects user
+experience even
+after using PMU.
+
+I am totally fine to reuse PERF_PMU_CAP_AUX_NO_SG. If PMUs don't want to
+sacrifice performance for MM-friendly, why support scatter gather mode? If there
+are strong performance reasons to allocate contiguous AUX pages in
+scatter gather
+mode, I hope max_order is configurable in userspace.
+
+Currently, max_order is affected by aux_watermark. But aux_watermark
+also affects
+how frequently the PMU overflows AUX buffer and notifies userspace.
+It's not ideal
+to set aux_watermark to 1 page size. So if we want to make max_order user
+configurable, maybe we can add a one bit field in perf_event_attr?
+
+>
+> In Yabin's case, the AUX buffer work as a bounce buffer.  The hardware
+> trace data is copied by a driver from low level's contiguous buffer to
+> the AUX buffer.
+>
+> In this case we cannot benefit much from continguous AUX buffers.
+>
+> Thanks,
+> Leo
+Hi Arnaldo,
+
+On Wed, Apr 23, 2025 at 01:26:48PM -0300, Arnaldo Carvalho de Melo wrote:
+> On Fri, Mar 28, 2025 at 06:46:36PM -0700, Howard Chu wrote:
+> > Hello Namhyung,
+> > 
+> > On Tue, Mar 25, 2025 at 9:40 PM Namhyung Kim <namhyung@kernel.org> wrote:
+> > >
+> > > When -s/--summary option is used, it doesn't need (augmented) arguments
+> > > of syscalls.  Let's skip the augmentation and load another small BPF
+> > > program to collect the statistics in the kernel instead of copying the
+> > > data to the ring-buffer to calculate the stats in userspace.  This will
+> > > be much more light-weight than the existing approach and remove any lost
+> > > events.
+> > >
+> > > Let's add a new option --bpf-summary to control this behavior.  I cannot
+> > > make it default because there's no way to get e_machine in the BPF which
+> > > is needed for detecting different ABIs like 32-bit compat mode.
+> > >
+> > > No functional changes intended except for no more LOST events. :)
+> > >
+> > >   $ sudo ./perf trace -as --summary-mode=total --bpf-summary sleep 1
+> > >
+> > >    Summary of events:
+> > >
+> > >    total, 6194 events
+> > >
+> > >      syscall            calls  errors  total       min       avg       max       stddev
+> > >                                        (msec)    (msec)    (msec)    (msec)        (%)
+> > >      --------------- --------  ------ -------- --------- --------- ---------     ------
+> > >      epoll_wait           561      0  4530.843     0.000     8.076   520.941     18.75%
+> > >      futex                693     45  4317.231     0.000     6.230   500.077     21.98%
+> > >      poll                 300      0  1040.109     0.000     3.467   120.928     17.02%
+> > >      clock_nanosleep        1      0  1000.172  1000.172  1000.172  1000.172      0.00%
+> > >      ppoll                360      0   872.386     0.001     2.423   253.275     41.91%
+> > >      epoll_pwait           14      0   384.349     0.001    27.453   380.002     98.79%
+> > >      pselect6              14      0   108.130     7.198     7.724     8.206      0.85%
+> > >      nanosleep             39      0    43.378     0.069     1.112    10.084     44.23%
+> > >      ...
+> 
+> I added the following to align sched_[gs]etaffinity,
+
+Thanks for processing the patch and updating this.  But I'm afraid there
+are more syscalls with longer names and this is not the only place to
+print the syscall names.  Also I think we need to update length of the
+time fields.  So I prefer handling them in a separate patch later.
+
+Thanks,
+Namhyung
+ 
+> 
+> diff --git a/tools/perf/util/bpf-trace-summary.c b/tools/perf/util/bpf-trace-summary.c
+> index 114d8d9ed9b2d3f3..af37d3bb5f9c42e7 100644
+> --- a/tools/perf/util/bpf-trace-summary.c
+> +++ b/tools/perf/util/bpf-trace-summary.c
+> @@ -139,9 +139,9 @@ static int print_common_stats(struct syscall_data *data, FILE *fp)
+>  		/* TODO: support other ABIs */
+>  		name = syscalltbl__name(EM_HOST, node->syscall_nr);
+>  		if (name)
+> -			printed += fprintf(fp, "   %-15s", name);
+> +			printed += fprintf(fp, "   %-17s", name);
+>  		else
+> -			printed += fprintf(fp, "   syscall:%-7d", node->syscall_nr);
+> +			printed += fprintf(fp, "   syscall:%-9d", node->syscall_nr);
+>  
+>  		printed += fprintf(fp, " %8u %6u %9.3f %9.3f %9.3f %9.3f %9.2f%%\n",
+>  				   stat->count, stat->error, total, min, avg, max,
+On 4/23/2025 8:51 AM, Dave Hansen wrote:
+> On 4/22/25 01:21, Xin Li (Intel) wrote:
+>>   static __always_inline void sev_es_wr_ghcb_msr(u64 val)
+>>   {
+>> -	u32 low, high;
+>> -
+>> -	low  = (u32)(val);
+>> -	high = (u32)(val >> 32);
+>> -
+>> -	native_wrmsr(MSR_AMD64_SEV_ES_GHCB, low, high);
+>> +	native_wrmsrq(MSR_AMD64_SEV_ES_GHCB, val);
+>>   }
+> 
+> A note on ordering: Had this been a native_wrmsr()=>__wrmsr()
+> conversion, it could be sucked into the tree easily before the big
+> __wrmsr()=>native_wrmsrq() conversion.
+> 
+> Yeah, you'd have to base the big rename on top of this. But with a
+> series this big, I'd prioritize whatever gets it trimmed down.
+
+Okay, I will focus on cleanup first.
+On 4/23/2025 8:06 AM, Dave Hansen wrote:
+> On 4/23/25 07:28, Sean Christopherson wrote:
+>> Now that rdpmc() is gone, i.e. rdpmcl/rdpmcq() is the only helper, why not simply
+>> rename rdpmcl() => rdpmc()?  I see no point in adding a 'q' qualifier; it doesn't
+>> disambiguate anything and IMO is pure noise.
+> 
+> That makes total sense to me.
+> 
+
+Unable to argue with two maintainers on a simple naming ;), so will make
+the change.
+On 4/23/2025 7:13 AM, Dave Hansen wrote:
+> On 4/22/25 01:21, Xin Li (Intel) wrote:
+>> Relocate rdtsc{,_ordered}() from <asm/msr.h> to <asm/tsc.h>, and
+>> subsequently remove the inclusion of <asm/msr.h> in <asm/tsc.h>.
+>> Consequently, <asm/msr.h> must be included in several source files
+>> that previously did not require it.
+> 
+> I know it's mildly obvious but could you please add a problem statement
+> to these changelogs, even if it's just one little sentence?
+
+So "ALWAYS make a changelog a complete story", right?
+
+And that would be helpful for long term maintainability.
+
+> 
+> 	For some reason, there are some TSC-related functions in the
+> 	MSR header even though there is a tsc.h header.
+> 
+> 	Relocate rdtsc{,_ordered}() and	subsequently remove the
+> 	inclusion of <asm/msr.h> in <asm/tsc.h>. Consequently,
+> 	<asm/msr.h> must be included in several source files that
+> 	previously did not require it.
+> 
+> But I agree with the concept, so with this fixed:
+
+TBH, I did hesitate to touch so many files just to include msr.h.
+
+But because tsc.h doesn't reference any MSR definitions, it doesn't make 
+sense to include msr.h in tsc.h.  I still did the big changes.
+
+> 
+> Acked-by: Dave Hansen <dave.hansen@linux.intel.com>
+
+Thank you very much!
+On Fri, Mar 28, 2025 at 06:46:36PM -0700, Howard Chu wrote:
+> Hello Namhyung,
+> 
+> On Tue, Mar 25, 2025 at 9:40 PM Namhyung Kim <namhyung@kernel.org> wrote:
+> >
+> > When -s/--summary option is used, it doesn't need (augmented) arguments
+> > of syscalls.  Let's skip the augmentation and load another small BPF
+> > program to collect the statistics in the kernel instead of copying the
+> > data to the ring-buffer to calculate the stats in userspace.  This will
+> > be much more light-weight than the existing approach and remove any lost
+> > events.
+> >
+> > Let's add a new option --bpf-summary to control this behavior.  I cannot
+> > make it default because there's no way to get e_machine in the BPF which
+> > is needed for detecting different ABIs like 32-bit compat mode.
+> >
+> > No functional changes intended except for no more LOST events. :)
+> >
+> >   $ sudo ./perf trace -as --summary-mode=total --bpf-summary sleep 1
+> >
+> >    Summary of events:
+> >
+> >    total, 6194 events
+> >
+> >      syscall            calls  errors  total       min       avg       max       stddev
+> >                                        (msec)    (msec)    (msec)    (msec)        (%)
+> >      --------------- --------  ------ -------- --------- --------- ---------     ------
+> >      epoll_wait           561      0  4530.843     0.000     8.076   520.941     18.75%
+> >      futex                693     45  4317.231     0.000     6.230   500.077     21.98%
+> >      poll                 300      0  1040.109     0.000     3.467   120.928     17.02%
+> >      clock_nanosleep        1      0  1000.172  1000.172  1000.172  1000.172      0.00%
+> >      ppoll                360      0   872.386     0.001     2.423   253.275     41.91%
+> >      epoll_pwait           14      0   384.349     0.001    27.453   380.002     98.79%
+> >      pselect6              14      0   108.130     7.198     7.724     8.206      0.85%
+> >      nanosleep             39      0    43.378     0.069     1.112    10.084     44.23%
+> >      ...
+
+I added the following to align sched_[gs]etaffinity,
+
+Thanks,
+
+- Arnaldo
+
+
+diff --git a/tools/perf/util/bpf-trace-summary.c b/tools/perf/util/bpf-trace-summary.c
+index 114d8d9ed9b2d3f3..af37d3bb5f9c42e7 100644
+--- a/tools/perf/util/bpf-trace-summary.c
++++ b/tools/perf/util/bpf-trace-summary.c
+@@ -139,9 +139,9 @@ static int print_common_stats(struct syscall_data *data, FILE *fp)
+ 		/* TODO: support other ABIs */
+ 		name = syscalltbl__name(EM_HOST, node->syscall_nr);
+ 		if (name)
+-			printed += fprintf(fp, "   %-15s", name);
++			printed += fprintf(fp, "   %-17s", name);
+ 		else
+-			printed += fprintf(fp, "   syscall:%-7d", node->syscall_nr);
++			printed += fprintf(fp, "   syscall:%-9d", node->syscall_nr);
+ 
+ 		printed += fprintf(fp, " %8u %6u %9.3f %9.3f %9.3f %9.3f %9.2f%%\n",
+ 				   stat->count, stat->error, total, min, avg, max,
+On Fri, Mar 28, 2025 at 06:46:36PM -0700, Howard Chu wrote:
+> Hello Namhyung,
+> 
+> On Tue, Mar 25, 2025 at 9:40 PM Namhyung Kim <namhyung@kernel.org> wrote:
+> >
+> > When -s/--summary option is used, it doesn't need (augmented) arguments
+> > of syscalls.  Let's skip the augmentation and load another small BPF
+> > program to collect the statistics in the kernel instead of copying the
+> > data to the ring-buffer to calculate the stats in userspace.  This will
+> > be much more light-weight than the existing approach and remove any lost
+> > events.
+> >
+> > Let's add a new option --bpf-summary to control this behavior.  I cannot
+> > make it default because there's no way to get e_machine in the BPF which
+> > is needed for detecting different ABIs like 32-bit compat mode.
+> >
+> > No functional changes intended except for no more LOST events. :)
+> >
+> >   $ sudo ./perf trace -as --summary-mode=total --bpf-summary sleep 1
+> >
+> >    Summary of events:
+> >
+> >    total, 6194 events
+> >
+> >      syscall            calls  errors  total       min       avg       max       stddev
+> >                                        (msec)    (msec)    (msec)    (msec)        (%)
+> >      --------------- --------  ------ -------- --------- --------- ---------     ------
+> >      epoll_wait           561      0  4530.843     0.000     8.076   520.941     18.75%
+> >      futex                693     45  4317.231     0.000     6.230   500.077     21.98%
+> >      poll                 300      0  1040.109     0.000     3.467   120.928     17.02%
+> >      clock_nanosleep        1      0  1000.172  1000.172  1000.172  1000.172      0.00%
+> >      ppoll                360      0   872.386     0.001     2.423   253.275     41.91%
+> >      epoll_pwait           14      0   384.349     0.001    27.453   380.002     98.79%
+> >      pselect6              14      0   108.130     7.198     7.724     8.206      0.85%
+> >      nanosleep             39      0    43.378     0.069     1.112    10.084     44.23%
+> >      ...
+> >
+> > Cc: Howard Chu <howardchu95@gmail.com>
+> > Signed-off-by: Namhyung Kim <namhyung@kernel.org>
+> > ---
+> > v4)
+> >  * fix segfault on -S  (Howard)
+> >  * correct some comments  (Howard)
+> 
+> + if (!hashmap__find(hash, map_key->nr, &data)) {
+> 
+> I think you should mention the hashmap's map_key->nr update, as this
+> change is actually important for the feature.
+> 
+> >
+> > v3)
+> >  * support -S/--with-summary option too  (Howard)
+> >  * make it work only with -a/--all-cpus  (Howard)
+> >  * fix stddev calculation  (Howard)
+> >  * add some comments about syscall_data  (Howard)
+> >
+> > v2)
+> >  * Rebased on top of Ian's e_machine changes
+> >  * add --bpf-summary option
+> >  * support per-thread summary
+> >  * add stddev calculation  (Howard)
+> >
+> >  tools/perf/Documentation/perf-trace.txt       |   6 +
+> >  tools/perf/Makefile.perf                      |   2 +-
+> >  tools/perf/builtin-trace.c                    |  54 ++-
+> >  tools/perf/util/Build                         |   1 +
+> >  tools/perf/util/bpf-trace-summary.c           | 347 ++++++++++++++++++
+> >  .../perf/util/bpf_skel/syscall_summary.bpf.c  | 118 ++++++
+> >  tools/perf/util/bpf_skel/syscall_summary.h    |  25 ++
+> >  tools/perf/util/trace.h                       |  37 ++
+> >  8 files changed, 577 insertions(+), 13 deletions(-)
+> >  create mode 100644 tools/perf/util/bpf-trace-summary.c
+> >  create mode 100644 tools/perf/util/bpf_skel/syscall_summary.bpf.c
+> >  create mode 100644 tools/perf/util/bpf_skel/syscall_summary.h
+> >  create mode 100644 tools/perf/util/trace.h
+> >
+> > diff --git a/tools/perf/Documentation/perf-trace.txt b/tools/perf/Documentation/perf-trace.txt
+> > index 887dc37773d0f4d6..a8a0d8c33438fef7 100644
+> > --- a/tools/perf/Documentation/perf-trace.txt
+> > +++ b/tools/perf/Documentation/perf-trace.txt
+> > @@ -251,6 +251,12 @@ the thread executes on the designated CPUs. Default is to monitor all CPUs.
+> >         pretty-printing serves as a fallback to hand-crafted pretty printers, as the latter can
+> >         better pretty-print integer flags and struct pointers.
+> >
+> > +--bpf-summary::
+> > +       Collect system call statistics in BPF.  This is only for live mode and
+> > +       works well with -s/--summary option where no argument information is
+> > +       required.
+
+root@number:~#> 
+> It works with -S as well, doesn't it?
+
+Yes, I tested it:
+
+root@number:~# perf trace -aS --summary-mode=total --bpf-summary sleep 0.000000001
+     0.011 ( 0.008 ms): :146484/146484 execve(filename: "/home/acme/libexec/perf-core/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) = -1 ENOENT (No such file or directory)
+     0.021 ( 0.002 ms): :146484/146484 execve(filename: "/root/.local/bin/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) = -1 ENOENT (No such file or directory)
+     0.024 ( 0.002 ms): :146484/146484 execve(filename: "/root/bin/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) = -1 ENOENT (No such file or directory)
+     0.026 ( 0.002 ms): :146484/146484 execve(filename: "/usr/local/sbin/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) = -1 ENOENT (No such file or directory)
+     0.029 ( 0.001 ms): :146484/146484 execve(filename: "/usr/local/bin/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) = -1 ENOENT (No such file or directory)
+         ? (         ): sudo/115804  ... [continued]: ppoll())                                            = 1
+     0.032 (         ): :146484/146484 execve(filename: "/usr/sbin/sleep", argv: 0x7ffcdf2108f0, envp: 0x37fabf70) ...
+     0.146 ( 0.002 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x557bdbdec4c0,.sa_flags = (long unsigned int)67108864,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, oact: 0x7ffff79f7d80, sigsetsize: 8) = 0
+     0.150 ( 0.003 ms): sudo/115804 read(fd: 9</dev/ptmx>, buf: 0x557be6008260, count: 65536)             = 297
+     0.155 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x1,.sa_flags = (long unsigned int)335544320,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, sigsetsize: 8) = 0
+     0.158 ( 0.001 ms): sudo/115804 rt_sigprocmask(nset: 0x557bdbe1a6a0, oset: 0x7ffff79f7d70, sigsetsize: 8) = 0
+     0.162 ( 0.001 ms): sudo/115804 rt_sigprocmask(how: SETMASK, nset: 0x7ffff79f7d70, sigsetsize: 8)     = 0
+     0.165 ( 0.002 ms): sudo/115804 ppoll(ufds: 0x557be5f955b0, nfds: 5, sigsetsize: 8)                   = 2
+     0.169 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x557bdbdec4c0,.sa_flags = (long unsigned int)67108864,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, oact: 0x7ffff79f7d80, sigsetsize: 8) = 0
+     0.171 ( 0.002 ms): sudo/115804 read(fd: 9</dev/ptmx>, buf: 0x557be6008389, count: 65239)             = 502
+     0.175 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x1,.sa_flags = (long unsigned int)335544320,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, sigsetsize: 8) = 0
+     0.177 ( 0.001 ms): sudo/115804 rt_sigprocmask(nset: 0x557bdbe1a6a0, oset: 0x7ffff79f7d70, sigsetsize: 8) = 0
+     0.179 ( 0.001 ms): sudo/115804 rt_sigprocmask(how: SETMASK, nset: 0x7ffff79f7d70, sigsetsize: 8)     = 0
+     0.181 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTOU, act: (struct sigaction){.sa_handler = (__sighandler_t)0x557bdbdec4d0,.sa_flags = (long unsigned int)67108864,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, oact: 0x7ffff79f7d80, sigsetsize: 8) = 0
+     0.183 ( 0.004 ms): sudo/115804 write(fd: 8</dev/tty>, buf:          ? (         ): :146484/, count: 799) = 799
+     0.189 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTOU, act: (struct sigaction){.sa_handler = (__sighandler_t)0x1,.sa_flags = (long unsigned int)335544320,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, sigsetsize: 8) = 0
+     0.193 ( 0.002 ms): sudo/115804 ppoll(ufds: 0x557be5f955b0, nfds: 4, sigsetsize: 8)                   = 1
+     0.196 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x557bdbdec4c0,.sa_flags = (long unsigned int)67108864,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, oact: 0x7ffff79f7d80, sigsetsize: 8) = 0
+     0.199 ( 0.002 ms): sudo/115804 read(fd: 9</dev/ptmx>, buf: 0x557be6008260, count: 65536)             = 379
+     0.201 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTIN, act: (struct sigaction){.sa_handler = (__sighandler_t)0x1,.sa_flags = (long unsigned int)335544320,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, sigsetsize: 8) = 0
+     0.203 ( 0.001 ms): sudo/115804 rt_sigprocmask(nset: 0x557bdbe1a6a0, oset: 0x7ffff79f7d70, sigsetsize: 8) = 0
+     0.205 ( 0.001 ms): sudo/115804 rt_sigprocmask(how: SETMASK, nset: 0x7ffff79f7d70, sigsetsize: 8)     = 0
+     0.206 ( 0.002 ms): sudo/115804 ppoll(ufds: 0x557be5f955b0, nfds: 5, sigsetsize: 8)                   = 1
+     0.209 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTOU, act: (struct sigaction){.sa_handler = (__sighandler_t)0x557bdbdec4d0,.sa_flags = (long unsigned int)67108864,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, oact: 0x7ffff79f7d80, sigsetsize: 8) = 0
+     0.211 ( 0.002 ms): sudo/115804 write(fd: 8</dev/tty>, buf: ): :146484/146484 execve(filenam, count: 379) = 379
+     0.213 ( 0.001 ms): sudo/115804 rt_sigaction(sig: TTOU, act: (struct sigaction){.sa_handler = (__sighandler_t)0x1,.sa_flags = (long unsigned int)335544320,.sa_restorer = (__sigrestore_t)0x7f50c6627bf0,}, sigsetsize: 8) = 0
+         ? (         ): ptyxis/3622  ... [continued]: ppoll())                                            = 1
+     0.215 (         ): sudo/115804 ppoll(ufds: 0x557be5f955b0, nfds: 4, sigsetsize: 8)                ...
+     0.196 ( 0.002 ms): ptyxis/3622 write(fd: 4<anon_inode:[eventfd]>, buf: \1\0\0\0\0\0\0\0, count: 8)   = 8
+     0.206 ( 0.003 ms): ptyxis/3622 read(fd: 41</dev/ptmx>, buf: 0x5586a84ee428, count: 8136)             = 800
+     0.209 ( 0.001 ms): ptyxis/3622 read(fd: 41</dev/ptmx>, buf: 0x5586a84ee747, count: 7337)             = -1 EAGAIN (Resource temporarily unavailable)
+     0.221 ( 0.001 ms): ptyxis/3622 write(fd: 4<anon_inode:[eventfd]>, buf: \1\0\0\0\0\0\0\0, count: 8)   = 8
+     0.224 ( 0.002 ms): ptyxis/3622 ppoll(ufds: 0x5586a7e8f120, nfds: 10, tsp: 0x7ffdd1fbb470, sigsetsize: 8) = 2
+     0.227 ( 0.001 ms): ptyxis/3622 read(fd: 4<anon_inode:[eventfd]>, buf: 0x7ffdd1fbb3a0, count: 8)      = 8
+     0.229 ( 0.001 ms): ptyxis/3622 write(fd: 4<anon_inode:[eventfd]>, buf: \1\0\0\0\0\0\0\0, count: 8)   = 8
+     0.231 ( 0.001 ms): ptyxis/3622 read(fd: 41</dev/ptmx>, buf: 0x5586a84ee747, count: 7337)             = 380
+     0.233 ( 0.001 ms): ptyxis/3622 read(fd: 41</dev/ptmx>, buf: 0x5586a84ee8c2, count: 6958)             = -1 EAGAIN (Resource temporarily unavailable)
+     0.234 ( 0.001 ms): ptyxis/3622 write(fd: 4<anon_inode:[eventfd]>, buf: \1\0\0\0\0\0\0\0, count: 8)   = 8
+     0.236 ( 0.001 ms): ptyxis/3622 ppoll(ufds: 0x5586a7e8f120, nfds: 10, tsp: 0x7ffdd1fbb470, sigsetsize: 8) = 1
+     0.238 ( 0.001 ms): ptyxis/3622 read(fd: 4<anon_inode:[eventfd]>, buf: 0x7ffdd1fbb3a0, count: 8)      = 8
+         ? (         ): mdns_service/5565  ... [continued]: recvfrom())                                         = -1 EAGAIN (Resource temporarily unavailable)
+     0.241 (         ): ptyxis/3622 ppoll(ufds: 0x5586a7e8f120, nfds: 10, tsp: 0x7ffdd1fbb470, sigsetsize: 8) ...
+     0.032 ( 0.627 ms): sleep/146484  ... [continued]: execve())                                           = 0
+     1.059 (         ): mdns_service/5565 recvfrom(fd: 292<socket:[81029]>, ubuf: 0x7f6cfdc454c0, size: 9000, addr: 0x7f6cfdc47b00, addr_len: 0x7f6cfdc47a00) ...
+     0.676 ( 0.001 ms): sleep/146484 brk()                                                                 = 0x56443e2d4000
+     0.689 ( 0.002 ms): sleep/146484 mmap(len: 8192, prot: READ|WRITE, flags: PRIVATE|ANONYMOUS)           = 0x7fe66d41d000
+     0.693 ( 0.002 ms): sleep/146484 access(filename: "/etc/ld.so.preload", mode: R)                       = -1 ENOENT (No such file or directory)
+     0.698 ( 0.002 ms): sleep/146484 openat(dfd: CWD, filename: "/etc/ld.so.cache", flags: RDONLY|CLOEXEC) = 3
+     0.701 ( 0.001 ms): sleep/146484 fstat(fd: 3, statbuf: 0x7ffefb498350)                                 = 0
+     0.704 ( 0.003 ms): sleep/146484 mmap(len: 76091, prot: READ, flags: PRIVATE, fd: 3)                   = 0x7fe66d40a000
+     0.708 ( 0.001 ms): sleep/146484 close(fd: 3)                                                          = 0
+     0.712 ( 0.002 ms): sleep/146484 openat(dfd: CWD, filename: "/lib64/libc.so.6", flags: RDONLY|CLOEXEC) = 3
+     0.715 ( 0.001 ms): sleep/146484 read(fd: 3, buf: 0x7ffefb4984b8, count: 832)                          = 832
+     0.717 ( 0.001 ms): sleep/146484 pread64(fd: 3, buf: 0x7ffefb4980a0, count: 784, pos: 64)              = 784
+     0.719 ( 0.001 ms): sleep/146484 fstat(fd: 3, statbuf: 0x7ffefb498340)                                 = 0
+     0.722 ( 0.001 ms): sleep/146484 pread64(fd: 3, buf: 0x7ffefb497f80, count: 784, pos: 64)              = 784
+     0.723 ( 0.003 ms): sleep/146484 mmap(len: 2038872, prot: READ|EXEC, flags: PRIVATE|DENYWRITE, fd: 3)  = 0x7fe66d218000
+     0.727 ( 0.004 ms): sleep/146484 mmap(addr: 0x7fe66d387000, len: 479232, prot: READ, flags: PRIVATE|FIXED|DENYWRITE, fd: 3, off: 0x16f000) = 0x7fe66d387000
+     0.733 ( 0.003 ms): sleep/146484 mmap(addr: 0x7fe66d3fc000, len: 24576, prot: READ|WRITE, flags: PRIVATE|FIXED|DENYWRITE, fd: 3, off: 0x1e3000) = 0x7fe66d3fc000
+     0.737 ( 0.002 ms): sleep/146484 mmap(addr: 0x7fe66d402000, len: 31832, prot: READ|WRITE, flags: PRIVATE|FIXED|ANONYMOUS) = 0x7fe66d402000
+     0.743 ( 0.001 ms): sleep/146484 close(fd: 3)                                                          = 0
+     0.748 ( 0.002 ms): sleep/146484 mmap(len: 12288, prot: READ|WRITE, flags: PRIVATE|ANONYMOUS)          = 0x7fe66d215000
+     0.753 ( 0.001 ms): sleep/146484 arch_prctl(option: SET_FS, arg2: 0x7fe66d215740)                      = 0
+     0.754 ( 0.001 ms): sleep/146484 set_tid_address(tidptr: 0x7fe66d215a10)                               = 146484 (sleep)
+     0.757 ( 0.001 ms): sleep/146484 set_robust_list(head: (struct robust_list_head){.list = (struct robust_list){.next = (struct robust_list *)0x7fe66d215a20,},.futex_offset = (long int)-32,}, len: 24) = 0
+     0.759 ( 0.001 ms): sleep/146484 rseq(rseq: (struct rseq){.cpu_id = (__u32)4294967295,}, rseq_len: 32, sig: 1392848979) = 0
+     0.780 ( 0.003 ms): sleep/146484 mprotect(start: 0x7fe66d3fc000, len: 16384, prot: READ)               = 0
+     0.788 ( 0.002 ms): sleep/146484 mprotect(start: 0x564438854000, len: 4096, prot: READ)                = 0
+     0.792 ( 0.002 ms): sleep/146484 mprotect(start: 0x7fe66d459000, len: 8192, prot: READ)                = 0
+     0.798 ( 0.001 ms): sleep/146484 prlimit64(resource: STACK, old_rlim: 0x7ffefb498e90)                  = 0
+     0.807 ( 0.003 ms): sleep/146484 munmap(addr: 0x7fe66d40a000, len: 76091)                              = 0
+     0.817 ( 0.001 ms): sleep/146484 getrandom(ubuf: 0x7fe66d407218, len: 8, flags: NONBLOCK)              = 8
+     0.819 ( 0.001 ms): sleep/146484 brk()                                                                 = 0x56443e2d4000
+     0.821 ( 0.003 ms): sleep/146484 brk(brk: 0x56443e2f5000)                                              = 0x56443e2f5000
+     0.827 ( 0.032 ms): sleep/146484 openat(dfd: CWD, filename: "", flags: RDONLY|CLOEXEC)                 = 3
+     0.860 ( 0.001 ms): sleep/146484 fstat(fd: 3, statbuf: 0x7fe66d401800)                                 = 0
+     0.862 ( 0.002 ms): sleep/146484 mmap(len: 233242544, prot: READ, flags: PRIVATE, fd: 3)               = 0x7fe65f200000
+     0.867 ( 0.001 ms): sleep/146484 close(fd: 3)                                                          = 0
+     0.888 ( 0.003 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/locale.alias", flags: RDONLY|CLOEXEC) = 3
+     0.892 ( 0.001 ms): sleep/146484 fstat(fd: 3, statbuf: 0x7ffefb498a70)                                 = 0
+     0.895 ( 0.002 ms): sleep/146484 read(fd: 3, buf: 0x56443e2d5680, count: 4096)                         = 2998
+     0.901 ( 0.001 ms): sleep/146484 read(fd: 3, buf: 0x56443e2d5680, count: 4096)                         = 0
+     0.903 ( 0.001 ms): sleep/146484 close(fd: 3)                                                          = 0
+     0.909 ( 0.002 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en_US.UTF-8/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.912 ( 0.001 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en_US.utf8/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.914 ( 0.002 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en_US/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.916 ( 0.001 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en.UTF-8/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.918 ( 0.001 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en.utf8/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.920 ( 0.002 ms): sleep/146484 openat(dfd: CWD, filename: "/usr/share/locale/en/LC_MESSAGES/coreutils.mo") = -1 ENOENT (No such file or directory)
+     0.930 ( 0.055 ms): sleep/146484 clock_nanosleep(rqtp: { .tv_sec: 0, .tv_nsec: 1 }, rmtp: 0x7ffefb4990f0) = 0
+     0.987 ( 0.001 ms): sleep/146484 close(fd: 1)                                                          = 0
+     0.989 ( 0.001 ms): sleep/146484 close(fd: 2)                                                          = 0
+     0.992 (         ): sleep/146484 exit_group()                                                          = ?
+
+ Summary of events:
+
+ total, 3096 events
+
+   syscall            calls  errors  total       min       avg       max       stddev
+                                     (msec)    (msec)    (msec)    (msec)        (%)
+   --------------- --------  ------ -------- --------- --------- ---------     ------
+   ppoll                317      0    47.372     0.000     0.149     3.804     17.80%
+   recvfrom               8      8    18.000     1.986     2.250     2.996      7.19%
+   sched_setaffinity       66      0     0.743     0.001     0.011     0.021      6.16%
+   execve                 6      5     0.644     0.001     0.107     0.630     97.28%
+   write               1268      0     0.548     0.000     0.000     0.005      2.30%
+   read                 390     75     0.158     0.000     0.000     0.012      9.19%
+   ioctl                138      1     0.119     0.000     0.001     0.011     14.79%
+   newfstatat            28     17     0.079     0.001     0.003     0.025     33.91%
+   rt_sigaction         446      0     0.077     0.000     0.000     0.002      4.78%
+   futex                 20      1     0.077     0.000     0.004     0.037     51.43%
+   openat                13      6     0.057     0.001     0.004     0.032     51.97%
+   clock_nanosleep        1      0     0.055     0.055     0.055     0.055      0.00%
+   rt_sigprocmask       290      0     0.047     0.000     0.000     0.002      5.61%
+   mmap                   8      0     0.021     0.002     0.003     0.004     12.60%
+   poll                   4      0     0.015     0.000     0.004     0.014     92.77%
+   readlink               5      0     0.014     0.001     0.003     0.005     28.80%
+   close                 15      0     0.009     0.000     0.001     0.001     12.52%
+   pread64               10      0     0.009     0.000     0.001     0.003     26.77%
+   recvmsg               17     13     0.008     0.000     0.000     0.002     23.80%
+   mprotect               3      0     0.006     0.002     0.002     0.003     15.31%
+   sendmsg                5      0     0.006     0.001     0.001     0.002     21.98%
+   fstat                  6      0     0.005     0.000     0.001     0.001     23.30%
+   brk                    3      0     0.004     0.001     0.001     0.003     39.48%
+   munmap                 1      0     0.003     0.003     0.003     0.003      0.00%
+   access                 1      1     0.002     0.002     0.002     0.002      0.00%
+   timerfd_settime        5      0     0.002     0.000     0.000     0.000     11.96%
+   eventfd2               1      0     0.002     0.002     0.002     0.002      0.00%
+   sched_getaffinity        2      0     0.001     0.001     0.001     0.001      0.96%
+   getrandom              1      0     0.001     0.001     0.001     0.001      0.00%
+   rt_sigreturn           1      0     0.001     0.001     0.001     0.001      0.00%
+   prlimit64              1      0     0.001     0.001     0.001     0.001      0.00%
+   set_tid_address        1      0     0.001     0.001     0.001     0.001      0.00%
+   getpid                 6      0     0.001     0.000     0.000     0.000     14.19%
+   arch_prctl             1      0     0.001     0.001     0.001     0.001      0.00%
+   set_robust_list        1      0     0.001     0.001     0.001     0.001      0.00%
+   rseq                   1      0     0.001     0.001     0.001     0.001      0.00%
+   fcntl                  3      0     0.001     0.000     0.000     0.000     20.48%
+   epoll_wait             2      0     0.001     0.000     0.000     0.000     38.12%
+   uname                  1      0     0.000     0.000     0.000     0.000      0.00%
+ 
+> Anyway, I don't mind adding these details later on, so
+> 
+> Reviewed-by: Howard Chu <howardchu95@gmail.com>
+
+Thanks, applied to perf-tools-next,
+
+- Arnaldo
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 1295 bytes --]
+
+On 23.04.25 11:03, Xin Li wrote:
+> On 4/22/2025 4:12 AM, Jürgen Groß wrote:
+>>> +
+>>> +static __always_inline bool __rdmsrq(u32 msr, u64 *val, int type)
+>>> +{
+>>> +    bool ret;
+>>> +
+>>> +#ifdef CONFIG_XEN_PV
+>>> +    if (cpu_feature_enabled(X86_FEATURE_XENPV))
+>>> +        return __xenpv_rdmsrq(msr, val, type);
+>>
+>> I don't think this will work for the Xen PV case.
+> 
+> Well, I have been testing the code on xen-4.17 coming with Ubuntu
+> 24.04.2 LTS :)
+
+Hmm, seems that the accessed MSR(s) are the ones falling back to the
+native_rdmsr() calls. At least on the hardware you tested on.
+
+>> X86_FEATURE_XENPV is set only after the first MSR is being read.
+> 
+> No matter whether the code works or not, good catch!
+> 
+>>
+>> This can be fixed by setting the feature earlier, but it shows that the
+>> paravirt feature has its benefits in such cases.
+> 
+> See my other reply to let Xen handle all the details.
+> 
+> Plus the code actually works, I would actually argue the opposite :-P
+
+BTW, it was in kernel 6.12 I had to change the MSR read emulation for
+Xen-PV the last time (fix some problems with changed x86 topology
+detection). Things like that won't be easily put into the hypervisor,
+which needs to serve other OS-es, too.
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+
+[-- Attachment #1.1.1: Type: text/plain, Size: 6940 bytes --]
+
+On 23.04.25 10:51, Xin Li wrote:
+> On 4/22/2025 2:57 AM, Jürgen Groß wrote:
+>> On 22.04.25 10:22, Xin Li (Intel) wrote:
+>>> The story started from tglx's reply in [1]:
+>>>
+>>>    For actual performance relevant code the current PV ops mechanics
+>>>    are a horrorshow when the op defaults to the native instruction.
+>>>
+>>>    look at wrmsrl():
+>>>
+>>>    wrmsrl(msr, val
+>>>     wrmsr(msr, (u32)val, (u32)val >> 32))
+>>>      paravirt_write_msr(msr, low, high)
+>>>        PVOP_VCALL3(cpu.write_msr, msr, low, high)
+>>>
+>>>    Which results in
+>>>
+>>>     mov    $msr, %edi
+>>>     mov    $val, %rdx
+>>>     mov    %edx, %esi
+>>>     shr    $0x20, %rdx
+>>>     call    native_write_msr
+>>>
+>>>    and native_write_msr() does at minimum:
+>>>
+>>>     mov    %edi,%ecx
+>>>     mov    %esi,%eax
+>>>     wrmsr
+>>>     ret
+>>>
+>>>    In the worst case 'ret' is going through the return thunk. Not to
+>>>    talk about function prologues and whatever.
+>>>
+>>>    This becomes even more silly for trivial instructions like STI/CLI
+>>>    or in the worst case paravirt_nop().
+>>
+>> This is nonsense.
+>>
+>> In the non-Xen case the initial indirect call is directly replaced with
+>> STI/CLI via alternative patching, while for Xen it is replaced by a direct
+>> call.
+>>
+>> The paravirt_nop() case is handled in alt_replace_call() by replacing the
+>> indirect call with a nop in case the target of the call was paravirt_nop()
+>> (which is in fact no_func()).
+>>
+>>>
+>>>    The call makes only sense, when the native default is an actual
+>>>    function, but for the trivial cases it's a blatant engineering
+>>>    trainwreck.
+>>
+>> The trivial cases are all handled as stated above: a direct replacement
+>> instruction is placed at the indirect call position.
+> 
+> The above comment was given in 2023 IIRC, and you have addressed it.
+> 
+>>
+>>> Later a consensus was reached to utilize the alternatives mechanism to
+>>> eliminate the indirect call overhead introduced by the pv_ops APIs:
+>>>
+>>>      1) When built with !CONFIG_XEN_PV, X86_FEATURE_XENPV becomes a
+>>>         disabled feature, preventing the Xen code from being built
+>>>         and ensuring the native code is executed unconditionally.
+>>
+>> This is the case today already. There is no need for any change to have
+>> this in place.
+>>
+>>>
+>>>      2) When built with CONFIG_XEN_PV:
+>>>
+>>>         2.1) If not running on the Xen hypervisor (!X86_FEATURE_XENPV),
+>>>              the kernel runtime binary is patched to unconditionally
+>>>              jump to the native MSR write code.
+>>>
+>>>         2.2) If running on the Xen hypervisor (X86_FEATURE_XENPV), the
+>>>              kernel runtime binary is patched to unconditionally jump
+>>>              to the Xen MSR write code.
+>>
+>> I can't see what is different here compared to today's state.
+>>
+>>>
+>>> The alternatives mechanism is also used to choose the new immediate
+>>> form MSR write instruction when it's available.
+>>
+>> Yes, this needs to be added.
+>>
+>>> Consequently, remove the pv_ops MSR write APIs and the Xen callbacks.
+>>
+>> I still don't see a major difference to today's solution.
+> 
+> The existing code generates:
+> 
+>      ...
+>      bf e0 06 00 00          mov    $0x6e0,%edi
+>      89 d6                   mov    %edx,%esi
+>      48 c1 ea 20             shr    $0x20,%rdx
+>      ff 15 07 48 8c 01       call   *0x18c4807(%rip)  # <pv_ops+0xb8>
+>      31 c0                   xor    %eax,%eax
+>      ...
+> 
+> And on native, the indirect call instruction is patched to a direct call
+> as you mentioned:
+> 
+>      ...
+>      bf e0 06 00 00          mov    $0x6e0,%edi
+>      89 d6                   mov    %edx,%esi
+>      48 c1 ea 20             shr    $0x20,%rdx
+>      e8 60 3e 01 00          call   <{native,xen}_write_msr> # direct
+>      90                      nop
+>      31 c0                   xor    %eax,%eax
+>      ...
+> 
+> 
+> This patch set generates assembly w/o CALL on native:
+> 
+>      ...
+>      e9 e6 22 c6 01          jmp    1f   # on native or nop on Xen
+>      b9 e0 06 00 00          mov    $0x6e0,%ecx
+>      e8 91 d4 fa ff          call   ffffffff8134ee80 <asm_xen_write_msr>
+>      e9 a4 9f eb 00          jmp    ffffffff8225b9a0 <__x86_return_thunk>
+>          ...
+> 1:  b9 e0 06 00 00          mov    $0x6e0,%ecx   # immediate form here
+>      48 89 c2                mov    %rax,%rdx
+>      48 c1 ea 20             shr    $0x20,%rdx
+>      3e 0f 30                ds wrmsr
+>      ...
+> 
+> It's not a major change, but when it is patched to use the immediate form MSR 
+> write instruction, it's straightforwardly streamlined.
+
+It should be rather easy to switch the current wrmsr/rdmsr paravirt patching
+locations to use the rdmsr/wrmsr instructions instead of doing a call to
+native_*msr().
+
+The case of the new immediate form could be handled the same way.
+
+> 
+>>
+>> Only the "paravirt" term has been eliminated.
+> 
+> Yes.
+> 
+> But a PV guest doesn't operate at the highest privilege level, which
+> means MSR instructions typically result in a #GP fault.  I actually think the 
+> pv_ops MSR APIs are unnecessary because of this inherent
+> limitation.
+> 
+> Looking at the Xen MSR code, except PMU and just a few MSRs, it falls
+> back to executes native MSR instructions.  As MSR instructions trigger
+> #GP, Xen takes control and handles them in 2 ways:
+> 
+>    1) emulate (or ignore) a MSR operation and skip the guest instruction.
+> 
+>    2) inject the #GP back to guest OS and let its #GP handler handle it.
+>       But Linux MSR exception handler just ignores the MSR instruction
+>       (MCE MSR exception will panic).
+> 
+> So why not let Xen handle all the details which it already tries to do?
+
+Some MSRs are not handled that way, but via a kernel internal emulation.
+And those are handled that way mostly due to performance reasons. And some
+need special treatment.
+
+> (Linux w/ such a change may not be able to run on old Xen hypervisors.)
+
+Yes, and this is something to avoid.
+
+And remember that Linux isn't the only PV-mode guest existing.
+
+> BTW, if performance is a concern, writes to MSR_KERNEL_GS_BASE and
+> MSR_GS_BASE anyway are hpyercalls into Xen.
+
+Yes, and some other MSR writes are just NOPs with Xen-PV.
+
+
+Juergen
+
+[-- Attachment #1.1.2: OpenPGP public key --]
+[-- Type: application/pgp-keys, Size: 3743 bytes --]
+
+[-- Attachment #2: OpenPGP digital signature --]
+[-- Type: application/pgp-signature, Size: 495 bytes --]
+On 4/22/25 01:21, Xin Li (Intel) wrote:
+>  static __always_inline void sev_es_wr_ghcb_msr(u64 val)
+>  {
+> -	u32 low, high;
+> -
+> -	low  = (u32)(val);
+> -	high = (u32)(val >> 32);
+> -
+> -	native_wrmsr(MSR_AMD64_SEV_ES_GHCB, low, high);
+> +	native_wrmsrq(MSR_AMD64_SEV_ES_GHCB, val);
+>  }
+
+A note on ordering: Had this been a native_wrmsr()=>__wrmsr()
+conversion, it could be sucked into the tree easily before the big
+__wrmsr()=>native_wrmsrq() conversion.
+
+Yeah, you'd have to base the big rename on top of this. But with a
+series this big, I'd prioritize whatever gets it trimmed down.
+On 4/23/25 07:28, Sean Christopherson wrote:
+> Now that rdpmc() is gone, i.e. rdpmcl/rdpmcq() is the only helper, why not simply
+> rename rdpmcl() => rdpmc()?  I see no point in adding a 'q' qualifier; it doesn't
+> disambiguate anything and IMO is pure noise.
+
+That makes total sense to me.
+On Wed, Apr 23, 2025 at 7:23 AM Arnaldo Carvalho de Melo
+<acme@kernel.org> wrote:
+>
+> On Mon, Apr 14, 2025 at 10:41:27AM -0700, Ian Rogers wrote:
+> > evsel names and metric-ids are used for matching but this can be
+> > problematic, for example, multiple occurrences of the same retirement
+> > latency event become a single event for the record. Change the name of
+> > the record events so they are unique and reflect the evsel of the
+> > retirement latency event that opens them (the retirement latency
+> > event's evsel address is embedded within them). This allows an evsel
+> > based close to close the event when the retirement latency event is
+> > closed. This is important as perf stat has an evlist and the session
+> > listen to the record events has an evlist, knowing which event should
+> > remove the tpebs_retire_lat can't be tied to an evlist list as there
+> > is more than 1, so closing which evlist should cause the tpebs to
+> > stop? Using the evsel and the last one out doing the tpebs_stop is
+> > cleaner.
+> >
+> > Signed-off-by: Ian Rogers <irogers@google.com>
+> > Tested-by: Weilin Wang <weilin.wang@intel.com>
+> > Acked-by: Namhyung Kim <namhyung@kernel.org>
+> > ---
+> >  tools/perf/builtin-stat.c     |   2 -
+> >  tools/perf/util/evlist.c      |   1 -
+> >  tools/perf/util/evsel.c       |   2 +-
+> >  tools/perf/util/intel-tpebs.c | 150 +++++++++++++++++++++-------------
+> >  tools/perf/util/intel-tpebs.h |   2 +-
+> >  5 files changed, 93 insertions(+), 64 deletions(-)
+> >
+> > diff --git a/tools/perf/builtin-stat.c b/tools/perf/builtin-stat.c
+> > index 68ea7589c143..80e491bd775b 100644
+> > --- a/tools/perf/builtin-stat.c
+> > +++ b/tools/perf/builtin-stat.c
+> > @@ -681,8 +681,6 @@ static enum counter_recovery stat_handle_error(struct evsel *counter)
+> >       if (child_pid != -1)
+> >               kill(child_pid, SIGTERM);
+> >
+> > -     tpebs_delete();
+> > -
+> >       return COUNTER_FATAL;
+> >  }
+> >
+> > diff --git a/tools/perf/util/evlist.c b/tools/perf/util/evlist.c
+> > index c1a04141aed0..0a21da4f990f 100644
+> > --- a/tools/perf/util/evlist.c
+> > +++ b/tools/perf/util/evlist.c
+> > @@ -183,7 +183,6 @@ void evlist__delete(struct evlist *evlist)
+> >       if (evlist == NULL)
+> >               return;
+> >
+> > -     tpebs_delete();
+> >       evlist__free_stats(evlist);
+> >       evlist__munmap(evlist);
+> >       evlist__close(evlist);
+> > diff --git a/tools/perf/util/evsel.c b/tools/perf/util/evsel.c
+> > index 121283f2f382..554252ed1aab 100644
+> > --- a/tools/perf/util/evsel.c
+> <SNIP>
+>
+> >  static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+> >  {
+> >       struct tpebs_retire_lat *t;
+> > +     uint64_t num;
+> > +     const char *evsel_name;
+> >
+> > +     /*
+> > +      * Evsels will match for evlist with the retirement latency event. The
+> > +      * name with "tpebs_event_" prefix will be present on events being read
+> > +      * from `perf record`.
+> > +      */
+> > +     if (evsel__is_retire_lat(evsel)) {
+> > +             list_for_each_entry(t, &tpebs_results, nd) {
+> > +                     if (t->evsel == evsel)
+> > +                             return t;
+> > +             }
+> > +             return NULL;
+> > +     }
+> > +     evsel_name = strstr(evsel->name, "tpebs_event_");
+> > +     if (!evsel_name) {
+> > +             /* Unexpected that the perf record should have other events. */
+> > +             return NULL;
+> > +     }
+> > +     errno = 0;
+> > +     num = strtoull(evsel_name + 12, NULL, 16);
+> > +     if (errno) {
+> > +             pr_err("Bad evsel for tpebs find '%s'\n", evsel->name);
+> > +             return NULL;
+> > +     }
+> >       list_for_each_entry(t, &tpebs_results, nd) {
+> > -             if (t->tpebs_name == evsel->name ||
+> > -                 !strcmp(t->tpebs_name, evsel->name) ||
+> > -                 (evsel->metric_id && !strcmp(t->tpebs_name, evsel->metric_id)))
+> > +             if ((uint64_t)t->evsel == num)
+> >                       return t;
+>
+> I'm adding the following patch to address building on 32-bit systems:
+>
+>   20     4.97 debian:experimental-x-mips    : FAIL gcc version 14.2.0 (Debian 14.2.0-13)
+>     util/intel-tpebs.c: In function 'tpebs_retire_lat__find':
+>     util/intel-tpebs.c:377:21: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]
+>       377 |                 if ((uint64_t)t->evsel == num)
+>           |                     ^
+>     cc1: all warnings being treated as errors
+
+Thanks! Lgtm.
+
+Ian
+
+> - Arnaldo
+>
+> ⬢ [acme@toolbx perf-tools-next]$ git diff
+> diff --git a/tools/perf/util/intel-tpebs.c b/tools/perf/util/intel-tpebs.c
+> index a723687e67f6d7b3..b48f3692c798f924 100644
+> --- a/tools/perf/util/intel-tpebs.c
+> +++ b/tools/perf/util/intel-tpebs.c
+> @@ -242,7 +242,7 @@ static void tpebs_retire_lat__delete(struct tpebs_retire_lat *r)
+>  static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+>  {
+>         struct tpebs_retire_lat *t;
+> -       uint64_t num;
+> +       unsigned long num;
+>         const char *evsel_name;
+>
+>         /*
+> @@ -269,7 +269,7 @@ static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+>                 return NULL;
+>         }
+>         list_for_each_entry(t, &tpebs_results, nd) {
+> -               if ((uint64_t)t->evsel == num)
+> +               if ((unsigned long)t->evsel == num)
+>                         return t;
+>         }
+>         return NULL;
+>
+On Wed, Apr 23, 2025 at 6:56 AM Arnaldo Carvalho de Melo
+<acme@kernel.org> wrote:
+>
+> On Mon, Apr 14, 2025 at 10:41:32AM -0700, Ian Rogers wrote:
+> > Add command line configuration option for how retirement latency
+> > events are combined. The default "mean" gives the average of
+> > retirement latency. "min" or "max" give the smallest or largest
+> > retirment latency times respectively. "last" uses the last retirment
+> > latency sample's time.
+> >
+> > Signed-off-by: Ian Rogers <irogers@google.com>
+> > Tested-by: Weilin Wang <weilin.wang@intel.com>
+> > Acked-by: Namhyung Kim <namhyung@kernel.org>
+> > ---
+> >  tools/perf/Documentation/perf-stat.txt |  7 +++++++
+> >  tools/perf/builtin-stat.c              | 27 ++++++++++++++++++++++++++
+> >  tools/perf/util/intel-tpebs.c          | 20 ++++++++++++++++++-
+> >  tools/perf/util/intel-tpebs.h          |  8 ++++++++
+> >  4 files changed, 61 insertions(+), 1 deletion(-)
+> >
+> > diff --git a/tools/perf/Documentation/perf-stat.txt b/tools/perf/Documentation/perf-stat.txt
+> > index 2bc063672486..61d091670dee 100644
+> > --- a/tools/perf/Documentation/perf-stat.txt
+> > +++ b/tools/perf/Documentation/perf-stat.txt
+> > @@ -506,6 +506,13 @@ this option is not set. The TPEBS hardware feature starts from Intel Granite
+> >  Rapids microarchitecture. This option only exists in X86_64 and is meaningful on
+> >  Intel platforms with TPEBS feature.
+> >
+> > +--tpebs-mode=[mean|min|max|last]::
+> > +Set how retirement latency events have their sample times
+> > +combined. The default "mean" gives the average of retirement
+> > +latency. "min" or "max" give the smallest or largest retirment latency
+> > +times respectively. "last" uses the last retirment latency sample's
+> > +time.
+> > +
+> >  --td-level::
+> >  Print the top-down statistics that equal the input level. It allows
+> >  users to print the interested top-down metrics level instead of the
+> > diff --git a/tools/perf/builtin-stat.c b/tools/perf/builtin-stat.c
+> > index 80e491bd775b..4adf2ae53b11 100644
+> > --- a/tools/perf/builtin-stat.c
+> > +++ b/tools/perf/builtin-stat.c
+> > @@ -2327,6 +2327,30 @@ static void setup_system_wide(int forks)
+> >       }
+> >  }
+> >
+> > +static int parse_tpebs_mode(const struct option *opt, const char *str,
+> > +                         int unset __maybe_unused)
+> > +{
+> > +     enum tpebs_mode *mode = opt->value;
+> > +
+> > +     if (!strcasecmp("mean", str)) {
+> > +             *mode = TPEBS_MODE__MEAN;
+> > +             return 0;
+> > +     }
+> > +     if (!strcasecmp("min", str)) {
+> > +             *mode = TPEBS_MODE__MIN;
+> > +             return 0;
+> > +     }
+> > +     if (!strcasecmp("max", str)) {
+> > +             *mode = TPEBS_MODE__MAX;
+> > +             return 0;
+> > +     }
+> > +     if (!strcasecmp("last", str)) {
+> > +             *mode = TPEBS_MODE__LAST;
+> > +             return 0;
+> > +     }
+> > +     return -1;
+> > +}
+> > +
+> >  int cmd_stat(int argc, const char **argv)
+> >  {
+> >       struct opt_aggr_mode opt_mode = {};
+> > @@ -2431,6 +2455,9 @@ int cmd_stat(int argc, const char **argv)
+> >  #ifdef HAVE_ARCH_X86_64_SUPPORT
+> >               OPT_BOOLEAN(0, "record-tpebs", &tpebs_recording,
+> >                       "enable recording for tpebs when retire_latency required"),
+> > +             OPT_CALLBACK(0, "tpebs-mode", &tpebs_mode, "tpebs-mode",
+> > +                     "Mode of TPEBS recording: mean, min or max",
+> > +                     parse_tpebs_mode),
+> >  #endif
+>
+>   20     5.60 debian:experimental-x-mips    : FAIL gcc version 14.2.0 (Debian 14.2.0-1)
+>     builtin-stat.c:2330:12: error: 'parse_tpebs_mode' defined but not used [-Werror=unused-function]
+>      2330 | static int parse_tpebs_mode(const struct option *opt, const char *str,
+>           |            ^~~~~~~~~~~~~~~~
+>     --
+>
+>
+> I'm enclosing parse_tpebs_mode() under #ifdef HAVE_ARCH_X86_64_SUPPORT
+> to fix this.
+
+Thanks, I agree with the fix. Longer term I think we can remove the
+HAVE_ARCH_X86_64_SUPPORT. Now that events carry the retirement latency
+information and hardware isn't required, there's no reason why
+retirement latency couldn't be added to architectures that aren't
+Intel (HAVE_ARCH_X86_64_SUPPORT is already covering AMD which lacks
+support).
+
+Thanks,
+Ian
+
+> - Arnaldo
+>
+> >               OPT_UINTEGER(0, "td-level", &stat_config.topdown_level,
+> >                       "Set the metrics level for the top-down statistics (0: max level)"),
+> > diff --git a/tools/perf/util/intel-tpebs.c b/tools/perf/util/intel-tpebs.c
+> > index de9fea601964..6b00bd5b0af1 100644
+> > --- a/tools/perf/util/intel-tpebs.c
+> > +++ b/tools/perf/util/intel-tpebs.c
+> > @@ -31,6 +31,7 @@
+> >  #define PERF_DATA            "-"
+> >
+> >  bool tpebs_recording;
+> > +enum tpebs_mode tpebs_mode;
+> >  static LIST_HEAD(tpebs_results);
+> >  static pthread_t tpebs_reader_thread;
+> >  static struct child_process tpebs_cmd;
+> > @@ -45,6 +46,8 @@ struct tpebs_retire_lat {
+> >       char *event;
+> >       /** @stats: Recorded retirement latency stats. */
+> >       struct stats stats;
+> > +     /** @last: Last retirement latency read. */
+> > +     uint64_t last;
+> >       /* Has the event been sent to perf record? */
+> >       bool started;
+> >  };
+> > @@ -142,6 +145,7 @@ static int process_sample_event(const struct perf_tool *tool __maybe_unused,
+> >        * latency value will be used. Save the number of samples and the sum of
+> >        * retire latency value for each event.
+> >        */
+> > +     t->last = sample->retire_lat;
+> >       update_stats(&t->stats, sample->retire_lat);
+> >       mutex_unlock(tpebs_mtx_get());
+> >       return 0;
+> > @@ -517,7 +521,21 @@ int evsel__tpebs_read(struct evsel *evsel, int cpu_map_idx, int thread)
+> >                       return ret;
+> >               mutex_lock(tpebs_mtx_get());
+> >       }
+> > -     val = rint(t->stats.mean);
+> > +     switch (tpebs_mode) {
+> > +     case TPEBS_MODE__MIN:
+> > +             val = rint(t->stats.min);
+> > +             break;
+> > +     case TPEBS_MODE__MAX:
+> > +             val = rint(t->stats.max);
+> > +             break;
+> > +     case TPEBS_MODE__LAST:
+> > +             val = t->last;
+> > +             break;
+> > +     default:
+> > +     case TPEBS_MODE__MEAN:
+> > +             val = rint(t->stats.mean);
+> > +             break;
+> > +     }
+> >       mutex_unlock(tpebs_mtx_get());
+> >
+> >       if (old_count) {
+> > diff --git a/tools/perf/util/intel-tpebs.h b/tools/perf/util/intel-tpebs.h
+> > index 218a82866cee..9475e2e6ea74 100644
+> > --- a/tools/perf/util/intel-tpebs.h
+> > +++ b/tools/perf/util/intel-tpebs.h
+> > @@ -8,7 +8,15 @@
+> >  struct evlist;
+> >  struct evsel;
+> >
+> > +enum tpebs_mode {
+> > +     TPEBS_MODE__MEAN,
+> > +     TPEBS_MODE__MIN,
+> > +     TPEBS_MODE__MAX,
+> > +     TPEBS_MODE__LAST,
+> > +};
+> > +
+> >  extern bool tpebs_recording;
+> > +extern enum tpebs_mode tpebs_mode;
+> >
+> >  int evsel__tpebs_open(struct evsel *evsel);
+> >  void evsel__tpebs_close(struct evsel *evsel);
+> > --
+> > 2.49.0.604.gff1f9ca942-goog
+
+
+On 23/04/2025 10:24 am, Jon Hunter wrote:
+> 
+> On 16/04/2025 14:26, James Clark wrote:
+>>
+>>
+>> On 14/04/2025 5:28 pm, James Clark wrote:
+>>>
+>>>
+>>> On 10/04/2025 1:11 am, Namhyung Kim wrote:
+>>>> To pick up the changes in:
+>>>>
+>>>>    c4a16820d9019940 fs: add open_tree_attr()
+>>>>    2df1ad0d25803399 x86/arch_prctl: Simplify sys_arch_prctl()
+>>>>    e632bca07c8eef1d arm64: generate 64-bit syscall.tbl
+>>>>
+>>>> This is basically to support the new open_tree_attr syscall.  But it
+>>>> also needs to update asm-generic unistd.h header to get the new syscall
+>>>> number.  And arm64 unistd.h header was converted to use the generic
+>>>> 64-bit header.
+>>>>
+>>>> Addressing this perf tools build warning:
+>>>>
+>>>>    Warning: Kernel ABI header differences:
+>>>>      diff -u tools/scripts/syscall.tbl scripts/syscall.tbl
+>>>>      diff -u tools/perf/arch/x86/entry/syscalls/syscall_32.tbl arch/ 
+>>>> x86/entry/syscalls/syscall_32.tbl
+>>>>      diff -u tools/perf/arch/x86/entry/syscalls/syscall_64.tbl arch/ 
+>>>> x86/entry/syscalls/syscall_64.tbl
+>>>>      diff -u tools/perf/arch/powerpc/entry/syscalls/syscall.tbl 
+>>>> arch/ powerpc/kernel/syscalls/syscall.tbl
+>>>>      diff -u tools/perf/arch/s390/entry/syscalls/syscall.tbl arch/ 
+>>>> s390/kernel/syscalls/syscall.tbl
+>>>>      diff -u tools/perf/arch/mips/entry/syscalls/syscall_n64.tbl 
+>>>> arch/ mips/kernel/syscalls/syscall_n64.tbl
+>>>>      diff -u tools/perf/arch/arm/entry/syscalls/syscall.tbl arch/ 
+>>>> arm/ tools/syscall.tbl
+>>>>      diff -u tools/perf/arch/sh/entry/syscalls/syscall.tbl arch/sh/ 
+>>>> kernel/syscalls/syscall.tbl
+>>>>      diff -u tools/perf/arch/sparc/entry/syscalls/syscall.tbl arch/ 
+>>>> sparc/kernel/syscalls/syscall.tbl
+>>>>      diff -u tools/perf/arch/xtensa/entry/syscalls/syscall.tbl arch/ 
+>>>> xtensa/kernel/syscalls/syscall.tbl
+>>>>      diff -u tools/arch/arm64/include/uapi/asm/unistd.h arch/arm64/ 
+>>>> include/uapi/asm/unistd.h
+>>>>      diff -u tools/include/uapi/asm-generic/unistd.h include/uapi/ 
+>>>> asm- generic/unistd.h
+>>>>
+>>>> Please see tools/include/uapi/README for further details.
+>>>>
+>>>> Cc: linux-arch@vger.kernel.org
+>>>> Signed-off-by: Namhyung Kim <namhyung@kernel.org>
+>>>> ---
+>>>>   tools/arch/arm64/include/uapi/asm/unistd.h    | 24 
+>>>> +------------------
+>>>>   tools/include/uapi/asm-generic/unistd.h       |  4 +++-
+>>>>   .../perf/arch/arm/entry/syscalls/syscall.tbl  |  1 +
+>>>>   .../arch/mips/entry/syscalls/syscall_n64.tbl  |  1 +
+>>>>   .../arch/powerpc/entry/syscalls/syscall.tbl   |  1 +
+>>>>   .../perf/arch/s390/entry/syscalls/syscall.tbl |  1 +
+>>>>   tools/perf/arch/sh/entry/syscalls/syscall.tbl |  1 +
+>>>>   .../arch/sparc/entry/syscalls/syscall.tbl     |  1 +
+>>>>   .../arch/x86/entry/syscalls/syscall_32.tbl    |  3 ++-
+>>>>   .../arch/x86/entry/syscalls/syscall_64.tbl    |  1 +
+>>>>   .../arch/xtensa/entry/syscalls/syscall.tbl    |  1 +
+>>>>   tools/scripts/syscall.tbl                     |  1 +
+>>>>   12 files changed, 15 insertions(+), 25 deletions(-)
+>>>>
+>>>> diff --git a/tools/arch/arm64/include/uapi/asm/unistd.h b/tools/ 
+>>>> arch/ arm64/include/uapi/asm/unistd.h
+>>>> index 9306726337fe005e..df36f23876e863ff 100644
+>>>> --- a/tools/arch/arm64/include/uapi/asm/unistd.h
+>>>> +++ b/tools/arch/arm64/include/uapi/asm/unistd.h
+>>>> @@ -1,24 +1,2 @@
+>>>>   /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+>>>> -/*
+>>>> - * Copyright (C) 2012 ARM Ltd.
+>>>> - *
+>>>> - * This program is free software; you can redistribute it and/or 
+>>>> modify
+>>>> - * it under the terms of the GNU General Public License version 2 as
+>>>> - * published by the Free Software Foundation.
+>>>> - *
+>>>> - * This program is distributed in the hope that it will be useful,
+>>>> - * but WITHOUT ANY WARRANTY; without even the implied warranty of
+>>>> - * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+>>>> - * GNU General Public License for more details.
+>>>> - *
+>>>> - * You should have received a copy of the GNU General Public License
+>>>> - * along with this program.  If not, see <http://www.gnu.org/ 
+>>>> licenses/>.
+>>>> - */
+>>>> -
+>>>> -#define __ARCH_WANT_RENAMEAT
+>>>> -#define __ARCH_WANT_NEW_STAT
+>>>> -#define __ARCH_WANT_SET_GET_RLIMIT
+>>>> -#define __ARCH_WANT_TIME32_SYSCALLS
+>>>> -#define __ARCH_WANT_MEMFD_SECRET
+>>>> -
+>>>> -#include <asm-generic/unistd.h>
+>>>> +#include <asm/unistd_64.h>
+>>>
+>>> Hi Namhyung,
+>>>
+>>> Since we're not including the generic syscalls here anymore we now 
+>>> need to generate the syscall header file for the Perf build to work 
+>>> (build error pasted at the end for reference).
+>>>
+>>> I had a go at adding the rule for it, but I saw that we'd need to 
+>>> pull in quite a bit from the kernel so it was blurring the lines 
+>>> about the separation of the tools/ folder. For example this file has 
+>>> the arm64 defs:
+>>>
+>>>   arch/arm64/kernel/Makefile.syscalls
+>>>
+>>> To make this common part of the makefile work:
+>>>
+>>>   scripts/Makefile.asm-headers
+>>>
+>>> Maybe we can just copy or reimplement Makefile.syscalls, but I'm not 
+>>> even sure if Makefile.asm-headers will work with the tools/ build 
+>>> structure so maybe that has to be re-implemented too. Adding Arnd to 
+>>> see what he thinks.
+>>>
+>>> As far as I can tell this is a separate issue to the work that 
+>>> Charlie and Ian did recently to build all arch's syscall numbers into 
+>>> Perf to use for reporting, as this is requires a single header for 
+>>> the build.
+>>>
+>>> Thanks
+>>> James
+>>>
+>>> ---
+>>>
+>>> In file included from /usr/include/aarch64-linux-gnu/sys/syscall.h:24,
+>>>                   from evsel.c:4:
+>>> /home/jamcla02/workspace/linux/linux/tools/arch/arm64/include/uapi/ 
+>>> asm/ unistd.h:2:10: fatal error: asm/unistd_64.h: No such file or 
+>>> directory
+>>>      2 | #include <asm/unistd_64.h>
+>>>        |          ^~~~~~~~~~~~~~~~~
+>>>
+>>>
+>>>
+>>
+>> Hmmm I see this was also mentioned a while ago here [1]. Maybe I can 
+>> have another go at adding the makerule to generate the file. I'll 
+>> probably start by including as much as possible from the existing make 
+>> rules from the kernel side. I think something similar was already done 
+>> for generating the sysreg defs in commit 02e85f74668e ("tools: arm64: 
+>> Add a Makefile for generating sysreg-defs.h")
+>>
+>>
+>> [1]: https://lore.kernel.org/lkml/ZrO5HR9x2xyPKttx@google.com/T/ 
+>> #m269c1d3c64e3e0c96f45102d358d9583c69b722f
+> 
+> 
+> FWIW I am seeing this build issue too on ARM64 and these changes have 
+> now landed in the mainline :-(
+> 
+> So would be great to get this fixed or reverted.
+> 
+> Jon
+> 
+
+Hi Jon,
+
+I probably should have updated this thread, but the fix is here:
+
+https://lore.kernel.org/linux-perf-users/20250417-james-perf-fix-gen-syscall-v1-1-1d268c923901@linaro.org/
+
+Thanks
+James
+
+On Tue, Apr 22, 2025, Xin Li (Intel) wrote:
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+> ---
+>  arch/x86/events/amd/uncore.c              |  2 +-
+>  arch/x86/events/core.c                    |  2 +-
+>  arch/x86/events/intel/core.c              |  4 ++--
+>  arch/x86/events/intel/ds.c                |  2 +-
+>  arch/x86/include/asm/msr.h                |  2 +-
+>  arch/x86/include/asm/paravirt.h           |  2 +-
+>  arch/x86/kernel/cpu/resctrl/pseudo_lock.c | 12 ++++++------
+>  7 files changed, 13 insertions(+), 13 deletions(-)
+> 
+> diff --git a/arch/x86/events/amd/uncore.c b/arch/x86/events/amd/uncore.c
+> index f231e1078e51..b9933ab3116c 100644
+> --- a/arch/x86/events/amd/uncore.c
+> +++ b/arch/x86/events/amd/uncore.c
+> @@ -152,7 +152,7 @@ static void amd_uncore_read(struct perf_event *event)
+>  	if (hwc->event_base_rdpmc < 0)
+>  		rdmsrq(hwc->event_base, new);
+>  	else
+> -		rdpmcl(hwc->event_base_rdpmc, new);
+> +		rdpmcq(hwc->event_base_rdpmc, new);
+
+Now that rdpmc() is gone, i.e. rdpmcl/rdpmcq() is the only helper, why not simply
+rename rdpmcl() => rdpmc()?  I see no point in adding a 'q' qualifier; it doesn't
+disambiguate anything and IMO is pure noise.
+On 4/22/25 01:21, Xin Li (Intel) wrote:
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+
+Code: good.  No changelog: bad.
+
+Once there's some semblance of a changelog:
+
+Acked-by: Dave Hansen <dave.hansen@linux.intel.com>
+On 4/22/25 01:21, Xin Li (Intel) wrote:
+> Signed-off-by: Xin Li (Intel) <xin@zytor.com>
+
+We had a non-trivial discussion about the l=>q renames. Please at least
+include a sentence or two about those discussions.
+
+For the code:
+
+Acked-by: Dave Hansen <dave.hansen@linux.intel.com>
+On 4/22/25 01:21, Xin Li (Intel) wrote:
+> rdpmc() is not used anywhere, remove it.
+
+I'm not sure it was *ever* used (at least since git started). Thanks for
+finding this.
+
+Acked-by: Dave Hansen <dave.hansen@linux.intel.com>
+
+On Mon, Apr 14, 2025 at 10:41:27AM -0700, Ian Rogers wrote:
+> evsel names and metric-ids are used for matching but this can be
+> problematic, for example, multiple occurrences of the same retirement
+> latency event become a single event for the record. Change the name of
+> the record events so they are unique and reflect the evsel of the
+> retirement latency event that opens them (the retirement latency
+> event's evsel address is embedded within them). This allows an evsel
+> based close to close the event when the retirement latency event is
+> closed. This is important as perf stat has an evlist and the session
+> listen to the record events has an evlist, knowing which event should
+> remove the tpebs_retire_lat can't be tied to an evlist list as there
+> is more than 1, so closing which evlist should cause the tpebs to
+> stop? Using the evsel and the last one out doing the tpebs_stop is
+> cleaner.
+> 
+> Signed-off-by: Ian Rogers <irogers@google.com>
+> Tested-by: Weilin Wang <weilin.wang@intel.com>
+> Acked-by: Namhyung Kim <namhyung@kernel.org>
+> ---
+>  tools/perf/builtin-stat.c     |   2 -
+>  tools/perf/util/evlist.c      |   1 -
+>  tools/perf/util/evsel.c       |   2 +-
+>  tools/perf/util/intel-tpebs.c | 150 +++++++++++++++++++++-------------
+>  tools/perf/util/intel-tpebs.h |   2 +-
+>  5 files changed, 93 insertions(+), 64 deletions(-)
+> 
+> diff --git a/tools/perf/builtin-stat.c b/tools/perf/builtin-stat.c
+> index 68ea7589c143..80e491bd775b 100644
+> --- a/tools/perf/builtin-stat.c
+> +++ b/tools/perf/builtin-stat.c
+> @@ -681,8 +681,6 @@ static enum counter_recovery stat_handle_error(struct evsel *counter)
+>  	if (child_pid != -1)
+>  		kill(child_pid, SIGTERM);
+>  
+> -	tpebs_delete();
+> -
+>  	return COUNTER_FATAL;
+>  }
+>  
+> diff --git a/tools/perf/util/evlist.c b/tools/perf/util/evlist.c
+> index c1a04141aed0..0a21da4f990f 100644
+> --- a/tools/perf/util/evlist.c
+> +++ b/tools/perf/util/evlist.c
+> @@ -183,7 +183,6 @@ void evlist__delete(struct evlist *evlist)
+>  	if (evlist == NULL)
+>  		return;
+>  
+> -	tpebs_delete();
+>  	evlist__free_stats(evlist);
+>  	evlist__munmap(evlist);
+>  	evlist__close(evlist);
+> diff --git a/tools/perf/util/evsel.c b/tools/perf/util/evsel.c
+> index 121283f2f382..554252ed1aab 100644
+> --- a/tools/perf/util/evsel.c
+<SNIP>
+
+>  static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+>  {
+>  	struct tpebs_retire_lat *t;
+> +	uint64_t num;
+> +	const char *evsel_name;
+>  
+> +	/*
+> +	 * Evsels will match for evlist with the retirement latency event. The
+> +	 * name with "tpebs_event_" prefix will be present on events being read
+> +	 * from `perf record`.
+> +	 */
+> +	if (evsel__is_retire_lat(evsel)) {
+> +		list_for_each_entry(t, &tpebs_results, nd) {
+> +			if (t->evsel == evsel)
+> +				return t;
+> +		}
+> +		return NULL;
+> +	}
+> +	evsel_name = strstr(evsel->name, "tpebs_event_");
+> +	if (!evsel_name) {
+> +		/* Unexpected that the perf record should have other events. */
+> +		return NULL;
+> +	}
+> +	errno = 0;
+> +	num = strtoull(evsel_name + 12, NULL, 16);
+> +	if (errno) {
+> +		pr_err("Bad evsel for tpebs find '%s'\n", evsel->name);
+> +		return NULL;
+> +	}
+>  	list_for_each_entry(t, &tpebs_results, nd) {
+> -		if (t->tpebs_name == evsel->name ||
+> -		    !strcmp(t->tpebs_name, evsel->name) ||
+> -		    (evsel->metric_id && !strcmp(t->tpebs_name, evsel->metric_id)))
+> +		if ((uint64_t)t->evsel == num)
+>  			return t;
+
+I'm adding the following patch to address building on 32-bit systems:
+
+  20     4.97 debian:experimental-x-mips    : FAIL gcc version 14.2.0 (Debian 14.2.0-13) 
+    util/intel-tpebs.c: In function 'tpebs_retire_lat__find':
+    util/intel-tpebs.c:377:21: error: cast from pointer to integer of different size [-Werror=pointer-to-int-cast]
+      377 |                 if ((uint64_t)t->evsel == num)
+          |                     ^
+    cc1: all warnings being treated as errors
+
+- Arnaldo
+
+⬢ [acme@toolbx perf-tools-next]$ git diff
+diff --git a/tools/perf/util/intel-tpebs.c b/tools/perf/util/intel-tpebs.c
+index a723687e67f6d7b3..b48f3692c798f924 100644
+--- a/tools/perf/util/intel-tpebs.c
++++ b/tools/perf/util/intel-tpebs.c
+@@ -242,7 +242,7 @@ static void tpebs_retire_lat__delete(struct tpebs_retire_lat *r)
+ static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+ {
+        struct tpebs_retire_lat *t;
+-       uint64_t num;
++       unsigned long num;
+        const char *evsel_name;
+ 
+        /*
+@@ -269,7 +269,7 @@ static struct tpebs_retire_lat *tpebs_retire_lat__find(struct evsel *evsel)
+                return NULL;
+        }
+        list_for_each_entry(t, &tpebs_results, nd) {
+-               if ((uint64_t)t->evsel == num)
++               if ((unsigned long)t->evsel == num)
+                        return t;
+        }
+        return NULL;
+
+On 4/22/25 01:21, Xin Li (Intel) wrote:
+> Relocate rdtsc{,_ordered}() from <asm/msr.h> to <asm/tsc.h>, and
+> subsequently remove the inclusion of <asm/msr.h> in <asm/tsc.h>.
+> Consequently, <asm/msr.h> must be included in several source files
+> that previously did not require it.
+
+I know it's mildly obvious but could you please add a problem statement
+to these changelogs, even if it's just one little sentence?
+
+	For some reason, there are some TSC-related functions in the
+	MSR header even though there is a tsc.h header.
+
+	Relocate rdtsc{,_ordered}() and	subsequently remove the
+	inclusion of <asm/msr.h> in <asm/tsc.h>. Consequently,
+	<asm/msr.h> must be included in several source files that
+	previously did not require it.
+
+But I agree with the concept, so with this fixed:
+
+Acked-by: Dave Hansen <dave.hansen@linux.intel.com>
+On 4/23/25 02:27, Xin Li wrote:
+> One reason I chose verbose names is that short names are in use and
+> renaming needs to touch a lot of files (and not fun at all).
+
+This series is getting *WAY* too big.
+
+Could you please peel the renaming stuff out and we can get it applied
+independently of the new instruction gunk?
+On Mon, Apr 14, 2025 at 10:41:32AM -0700, Ian Rogers wrote:
+> Add command line configuration option for how retirement latency
+> events are combined. The default "mean" gives the average of
+> retirement latency. "min" or "max" give the smallest or largest
+> retirment latency times respectively. "last" uses the last retirment
+> latency sample's time.
+> 
+> Signed-off-by: Ian Rogers <irogers@google.com>
+> Tested-by: Weilin Wang <weilin.wang@intel.com>
+> Acked-by: Namhyung Kim <namhyung@kernel.org>
+> ---
+>  tools/perf/Documentation/perf-stat.txt |  7 +++++++
+>  tools/perf/builtin-stat.c              | 27 ++++++++++++++++++++++++++
+>  tools/perf/util/intel-tpebs.c          | 20 ++++++++++++++++++-
+>  tools/perf/util/intel-tpebs.h          |  8 ++++++++
+>  4 files changed, 61 insertions(+), 1 deletion(-)
+> 
+> diff --git a/tools/perf/Documentation/perf-stat.txt b/tools/perf/Documentation/perf-stat.txt
+> index 2bc063672486..61d091670dee 100644
+> --- a/tools/perf/Documentation/perf-stat.txt
+> +++ b/tools/perf/Documentation/perf-stat.txt
+> @@ -506,6 +506,13 @@ this option is not set. The TPEBS hardware feature starts from Intel Granite
+>  Rapids microarchitecture. This option only exists in X86_64 and is meaningful on
+>  Intel platforms with TPEBS feature.
+>  
+> +--tpebs-mode=[mean|min|max|last]::
+> +Set how retirement latency events have their sample times
+> +combined. The default "mean" gives the average of retirement
+> +latency. "min" or "max" give the smallest or largest retirment latency
+> +times respectively. "last" uses the last retirment latency sample's
+> +time.
+> +
+>  --td-level::
+>  Print the top-down statistics that equal the input level. It allows
+>  users to print the interested top-down metrics level instead of the
+> diff --git a/tools/perf/builtin-stat.c b/tools/perf/builtin-stat.c
+> index 80e491bd775b..4adf2ae53b11 100644
+> --- a/tools/perf/builtin-stat.c
+> +++ b/tools/perf/builtin-stat.c
+> @@ -2327,6 +2327,30 @@ static void setup_system_wide(int forks)
+>  	}
+>  }
+>  
+> +static int parse_tpebs_mode(const struct option *opt, const char *str,
+> +			    int unset __maybe_unused)
+> +{
+> +	enum tpebs_mode *mode = opt->value;
+> +
+> +	if (!strcasecmp("mean", str)) {
+> +		*mode = TPEBS_MODE__MEAN;
+> +		return 0;
+> +	}
+> +	if (!strcasecmp("min", str)) {
+> +		*mode = TPEBS_MODE__MIN;
+> +		return 0;
+> +	}
+> +	if (!strcasecmp("max", str)) {
+> +		*mode = TPEBS_MODE__MAX;
+> +		return 0;
+> +	}
+> +	if (!strcasecmp("last", str)) {
+> +		*mode = TPEBS_MODE__LAST;
+> +		return 0;
+> +	}
+> +	return -1;
+> +}
+> +
+>  int cmd_stat(int argc, const char **argv)
+>  {
+>  	struct opt_aggr_mode opt_mode = {};
+> @@ -2431,6 +2455,9 @@ int cmd_stat(int argc, const char **argv)
+>  #ifdef HAVE_ARCH_X86_64_SUPPORT
+>  		OPT_BOOLEAN(0, "record-tpebs", &tpebs_recording,
+>  			"enable recording for tpebs when retire_latency required"),
+> +		OPT_CALLBACK(0, "tpebs-mode", &tpebs_mode, "tpebs-mode",
+> +			"Mode of TPEBS recording: mean, min or max",
+> +			parse_tpebs_mode),
+>  #endif
+
+  20     5.60 debian:experimental-x-mips    : FAIL gcc version 14.2.0 (Debian 14.2.0-1) 
+    builtin-stat.c:2330:12: error: 'parse_tpebs_mode' defined but not used [-Werror=unused-function]
+     2330 | static int parse_tpebs_mode(const struct option *opt, const char *str,
+          |            ^~~~~~~~~~~~~~~~
+
+On 2025-04-23 2:47 a.m., Luo Gengkun wrote:
+> Perf doesn't work at perf stat for hardware events:
+> 
+>  $perf stat -- sleep 1
+>  Performance counter stats for 'sleep 1':
+>              16.44 msec task-clock                       #    0.016 CPUs utilized
+>                  2      context-switches                 #  121.691 /sec
+>                  0      cpu-migrations                   #    0.000 /sec
+>                 54      page-faults                      #    3.286 K/sec
+>    <not supported>	cycles
+>    <not supported>	instructions
+>    <not supported>	branches
+>    <not supported>	branch-misses
+> 
+> The reason is that the check in x86_pmu_hw_config for sampling event is
+> unexpectedly applied to the counting event.
+> 
+> Fixes: 88ec7eedbbd2 ("perf/x86: Fix low freqency setting issue")
+> Signed-off-by: Luo Gengkun <luogengkun@huaweicloud.com>
+
+Yes, it should only be applied for the sampling event. The
+event->attr.freq is always 0 in the counting mode.
+
+Reviewed-by: Kan Liang <kan.liang@linux.intel.com>
+
+Thanks,
+Kan> ---
+>  arch/x86/events/core.c | 2 +-
+>  1 file changed, 1 insertion(+), 1 deletion(-)
+> 
+> diff --git a/arch/x86/events/core.c b/arch/x86/events/core.c
+> index 6866cc5acb0b..3a4f031d2f44 100644
+> --- a/arch/x86/events/core.c
+> +++ b/arch/x86/events/core.c
+> @@ -629,7 +629,7 @@ int x86_pmu_hw_config(struct perf_event *event)
+>  	if (event->attr.type == event->pmu->type)
+>  		event->hw.config |= x86_pmu_get_event_config(event);
+>  
+> -	if (!event->attr.freq && x86_pmu.limit_period) {
+> +	if (is_sampling_event(event) && !event->attr.freq && x86_pmu.limit_period) {
+>  		s64 left = event->attr.sample_period;
+>  		x86_pmu.limit_period(event, &left);
+>  		if (left > event->attr.sample_period)
+
+On Wed, Apr 23, 2025, Xin Li wrote:
+> On 4/22/2025 8:09 AM, Sean Christopherson wrote:
+> > I strongly prefer that we find a way to not require such verbose APIs, especially
+> > if KVM ends up using native variants throughout.  Xen PV is supposed to be the
+> > odd one out, yet native code is what suffers.  Blech.
+> 
+> Will try to figure out how to name the APIs.
+> 
+> One reason I chose verbose names is that short names are in use and
+> renaming needs to touch a lot of files (and not fun at all).
+
+Yeah, I've looked at modifying rdmsrl() to "return" a value more than once, and
+ran away screaming every time.
+
+But since you're already doing a pile of renames, IMO this is the perfect time to
+do an aggressive cleanup.
+On Mon, Apr 21, 2025 at 11:13:49AM -0700, Ian Rogers wrote:
+> On Mon, Apr 14, 2025 at 12:08 PM Liang, Kan <kan.liang@linux.intel.com> wrote:
+> > On 2025-04-14 1:41 p.m., Ian Rogers wrote:

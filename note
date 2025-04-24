@@ -12,7 +12,7 @@ BAA/bge-reranker-v2m3 as the reranker model
 
 Top k = 15
 
-Chunk size = 2000
+Chunk size = 4000
 
 Chunk overlap = 200
 

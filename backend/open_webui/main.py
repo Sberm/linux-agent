@@ -1093,7 +1093,7 @@ async def chat_completion(
     tasks = form_data.pop("background_tasks", None)
 
     prompt = await check_and_craw(form_data['messages'][-1]['content'])
-    log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
+    # log.info(f"\n\n\033[0;33m{prompt}\033[0m\n\n")
     form_data['messages'][-1]['content'] = prompt
 
     metadata = {}

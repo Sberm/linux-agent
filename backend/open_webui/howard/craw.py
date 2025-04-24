@@ -1,14 +1,18 @@
 import logging
 import sys
 from open_webui.env import SRC_LOG_LEVELS
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString, Tag
 from playwright.async_api import async_playwright
 import time
 import json
+import re
+import open_webui.howard.debugTools as zijin
+
 
 log = logging.getLogger(__name__)
 log.setLevel(SRC_LOG_LEVELS["MODELS"])
-query="?q=d:1.days.ago.."
+# don't use it... horrible
+# query="?q=d:1.days.ago.."
 
 def log_color(d):
     log.info(f"\n\n\033[0;33m{d}\033[0m\n\n")
@@ -35,7 +39,8 @@ class Crawler:
         """
 
         # Use BeautifulSoup to parse the HTML
-        url = sub_archive_url + query
+        # url = sub_archive_url + query
+        url = sub_archive_url
         print(f"🌐 Loading sub-archive page: {url}")
         page = await self.context.new_page()
         await page.goto(url, wait_until="domcontentloaded")
@@ -46,23 +51,48 @@ class Crawler:
         soup = BeautifulSoup(html, 'html.parser')
 
         # All the mails links are under the first <pre> tag directly under <body>. 
-        pre = soup.select_one('body > pre')
+        pres = soup.select('body > pre')
 
-        if pre:
-            link_soup = BeautifulSoup(pre.encode_contents(), 'html.parser')
-            # links = [
-            #     a['href'] if a['href'].startswith('http') else sub_archive_url + a['href']
-            #     for a in link_soup.find_all('a', href=True)
-            # ]
+        zijin.output_to_file(str(pres) + '\n', filename='log.txt', mode='a')
+
+        if pres:
+            pre = pres[0]
+            # link_soup = BeautifulSoup(pre.encode_contents(), 'html.parser')
             links = []
 
-            for a in link_soup.find_all('a', href=True):
-                href = a['href']
-                url = href if href.startswith('http') else sub_archive_url + href
-                title = a.get_text(strip=True)
-                links.append((url, title))
+            # contents = pre.contents
+            
+            anchors = pre.find_all('a', href=True)
 
-            print(f"✅ Found {len(links)} links in <pre> block.")
+            cnt = 0
+
+            # @change
+            # Only select those anchors that are not after '`'
+            for anchor in anchors: 
+                previous = anchor.previous_sibling
+
+                if previous and isinstance(previous, NavigableString):
+                    if previous.strip().endswith('`'):
+                        # skip this link
+                        cnt += 1
+                        continue  
+
+                href = anchor['href']
+                url = href if href.startswith('http') else sub_archive_url + href
+                # url = url + 'T/#t'
+                title = anchor.get_text(strip=True)
+                links.append((url, title))            
+
+            # print(f"✅ Found {len(links)} links in <pre> block.")
+            log_color(f"✅ Found {len(links)} links in <pre> block.")
+            zijin.output_to_file('\n' + sub_archive_url + '\n', filename='log.txt', mode='a')
+            zijin.output_to_file(f"✅ Found {len(links)} links in <pre> block.\n", filename='log.txt', mode='a')
+            zijin.output_to_file(f"sub links: {cnt}\n", filename='log.txt', mode='a')
+
+            # @debug
+            # for url, title in links: 
+            #     zijin.output_to_file(f'{url}: {title}\n', filename='log.txt', mode='a')
+            
             return links
 
         else:
@@ -94,37 +124,85 @@ class Crawler:
         # Extract all <pre> tags directly under <body>. One email per <pre> tag. (Except for the last one)
         pre_tags = soup.select("body > pre")
 
-        # Remove the last <pre> tag. 
-        if pre_tags:
-            pre_tags = pre_tags[:-1]
-        else: 
-            print("❌ No <pre> block found.", file=sys.stderr)
-
         email_content_list = []
-        for pre in pre_tags: 
-            lines = (pre.text + "\n").splitlines()
+        # @change
+        # We only select the first email under this thread. 
+        pre = pre_tags[0]
 
-            # Remove all content after the last row with only '--'
-            cutoff_index = None
-            for i in reversed(range(len(lines))):
-                if lines[i].strip() == "--":
-                    cutoff_index = i
-                    break 
+        lines = (pre.text + "\n").splitlines()
 
-            if cutoff_index is not None:
-                lines = lines[:cutoff_index]
+        # Remove all content after the last row with only '--'
+        cutoff_index = None
+        for i in reversed(range(len(lines))):
+            if lines[i].strip() == "--":
+                cutoff_index = i
+                break 
 
-            content = str.join("\n", lines)
-            email_content_list.append(content)
+        if cutoff_index is not None:
+            lines = lines[:cutoff_index]
+
+        # content = str.join("\n", lines)
+        content = '\n'.join(lines)
+        # zijin.output_to_file(str(isinstance(content, str))+'\n', mode='a')
+        content = await self.extract_email_body(email=content)
+        email_content_list.append(content)
 
         return email_content_list
 
-    async def get_threads(self, sub_archive):
+    async def extract_email_body(self, email: str): 
+        """
+        Extract the body part of an email (represented as a string). 
+        @Still construct
+        """
+
+        # Normalize line endings
+        normalized = email.replace('\r\n', '\n').replace('\r', '\n')
+        # normalized = email
+        # Initial the return variable. 
+        body = normalized
+
+        # Cut off the header. 
+        # Find the position of the first 'From:' line
+        from_index = normalized.find('From:')
+        if from_index != -1:
+            # If we can find one 'From:' in the email. A normal email header should include this. 
+            # Search for first '\n\n' after 'From:'
+            header_end_index = normalized.find('\n\n', from_index)
+            if header_end_index != -1:
+                # Extract body starting after the blank line
+                body = normalized[header_end_index + 2:]
+
+        body = await self.cutoff_email_body_end(body)
+        # @debug: output
+        # zijin.output_to_file(body + '\n\n', filename='log.txt', mode='a')
+        return body
+    
+    async def cutoff_email_body_end(self, body: str):
+        """
+        Cut off the email endings based on 2 scenarios, 'Signed-off-by:' and 'Name '
+        """
+        lines = body.split('\n')
+        for i, line in enumerate(lines):
+            if line.strip().lower().startswith('signed-off-by:'):
+                return '\n'.join(lines[:i])
+
+        # Fallback pattern: line ending with [(number):]
+        pattern = re.compile(r'\(\d+\):\s*$')
+        for i, line in enumerate(lines):
+            if pattern.search(line.strip()):
+                return '\n'.join(lines[:i])
+            
+        return body
+        
+
+
+    async def get_threads(self, sub_archive, limit):
         """ 
         Return a thread list with each entry [url, title, emails]. 
         """
         links = await self.get_thread_links_under_sub_archive(sub_archive_url=f"https://lore.kernel.org/{sub_archive}/")
-        # limit = 5
+
+        links = links[:limit]
         
         threads = []
         
@@ -141,17 +219,34 @@ class Crawler:
         return threads
 
 
-    async def craw(self, sub_archive):
+    async def craw(self, sub_archive, user_query, limit):
         # links = await self.get_thread_links_under_sub_archive(sub_archive_url=f"https://lore.kernel.org/{sub_archive}/")
         # email_content_list = await self.get_emails_under_thread(thread_url=links[0][0])
         # log_color(email_content_list[0])
+
+        # refresh log files
+        zijin.output_to_file('', 'log.txt', mode='w')
+        zijin.output_to_file('', sub_archive + '.txt', mode='w')
+        
         start = time.perf_counter()
-        threads = await self.get_threads(sub_archive)
+        threads = await self.get_threads(sub_archive, limit)
         end = time.perf_counter()
         log_color(f'get thread used {(end - start) * 1000} ms')
+
+        # @debug
+        output_file_name = sub_archive + '.txt'
+        info = ''
         for thread in threads:
             # log_color(thread)
-            pass
+            emails = thread['description']
+            # log_color("emails")
+            # log_color(emails)
+            info += f'============ EMAIL ============{thread["title"]}============================\n'
+            info += '\n'.join(emails)
+            # pass
+            info += "\n\n"
+        zijin.output_to_file(info, output_file_name, mode='w')
+            
         return json.dumps(threads)
 
 async def check_and_craw(prompt):
@@ -486,8 +581,6 @@ async def check_and_craw(prompt):
         'ultralinux'
     ]
 
-    log_color('fuck you howard')
-
     if 'mailing' in prompt and 'list' in prompt:
         _p = prompt.split(' ')
         for p in _p:
@@ -495,10 +588,58 @@ async def check_and_craw(prompt):
                 if ml == p:
                     log_color(f'searching mailing list {p}')
                     await crawler.check()
-                    content = await crawler.craw(p)
+
+                    limit = 4
+                    limit_prefix = 'limit:'
+                    index = prompt.find(limit_prefix)
+                    if index != -1:
+                        index += len(limit_prefix)
+                        l_paren = -1
+                        r_paren = -1
+                        for i in range(index, len(prompt)):
+                            if prompt[i] == '(':
+                                l_paren = i
+                                break
+                        for i in range(l_paren + 1, len(prompt)):
+                            if prompt[i] == ')':
+                                r_paren = i
+                                break
+                        if l_paren != -1 and r_paren != -1:
+                            limit = int(prompt[l_paren + 1:r_paren])
+
+                    user_query = ""
+                    query_prefix = 'query:'
+                    index = prompt.find(query_prefix)
+                    if index != -1:
+                        index = index + len(query_prefix)
+                        l_paren = -1
+                        r_paren = -1
+                        for i in range(index, len(prompt)):
+                            if prompt[i] == '(':
+                                l_paren = i
+                                break
+                        for i in range(l_paren + 1, len(prompt)):
+                            if prompt[i] == ')':
+                                r_paren = i
+                                break
+                        if l_paren != -1 and r_paren != -1:
+                            user_query = prompt[l_paren + 1:r_paren].replace(' ', '+')
+
+                    # TODO:
+                    # does off-cpu's dash needs replacement?
+                    log_color("query: " + user_query + "; limit: " + str(limit))
+
+                    content = await crawler.craw(p, user_query, limit)
                     return f"""
-Here are patches from the Linux mailing list, summary them based on the descriptions and titles, 
-don\' t provide any other information. patches: \"{content}\""""
+Here are emails as context from the Linux mailing list, summary them based on their titles and descriptions, 
+don\' t provide any other information. 
+
+<context>
+\"{content}\"
+</context>
+
+Please give your summary based on their titles and descriptions.
+"""
 
     return prompt
 
