@@ -1,5 +1,97 @@
 ### Linux Agent
 
+#### Installation
+
+Please clone the repo first
+```
+git clone https://github.com/Sberm/linux-agent.git 
+```
+
+cd the directory
+```
+cd linux-agent
+```
+
+##### Frontend
+
+Please install Node.js and npm. Node.js should be Version 22.10 or higher. On
+Ubuntu, it is:
+```
+sudo apt install nodejs npm
+
+linux-agent $ node -v
+v22.15.0
+```
+
+make an .env file
+```
+cp .env.example .env
+```
+
+Running:
+```
+npm run dev
+```
+
+##### Backend
+
+Please use Python version >= 3.11.
+```
+cd backend
+# please change '~/linux-venv' to your desired venv path
+python -m venv ~/linux-venv
+source ~/linux-venv/activate/bin
+pip install -r requirement.txt
+
+# install xvfb
+sudo apt install xvfb
+
+# run
+sh dev.sh
+```
+
+##### Ollama
+
+Please install ollama using this command: 
+```
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+After this, serve and pull models
+```
+ollama serve
+
+# in another bash window
+ollama pull deepseek-r1:14b
+ollama pull bge-m3
+ollama pull linux6200/bge-reranker-v2-m3
+```
+
+The application should be running by now, please create your admin account.
+
+##### Importing RAG Documents
+
+You need to import documents manually, as the vector database binary
+intermediate files are not committed to the GitHub repository.
+
+On the front-end page, select `Workspace` -> `Knowledge` -> `plus sign` -> `Create a
+knowledge base`.
+
+Please import the documents by selecting the knowledge base you just created,
+pressing the add sign, and uploading the files. The files are located in
+`./rag-data`.
+
+After that, select `Workspace` -> `Models` -> `plus sign`. Choose the DeepSeek model
+you just pulled and click `Select Knowledge`. Choose the knowledge base you just
+created; you can name this combination `deepseek + kernel`.
+
+Now, click `New Chat`, select the `deepseek + kernel` model, and start making
+queries.
+
+The mailing list summarizer doesn't require additional setup, but it is
+recommended to perform summaries using the `deepseek + kernel` model instead of
+the base model, since additional retrieved context is included.
+
 #### Prompt examples:
 
 1. What is coreboot_device_id
